@@ -108,8 +108,7 @@ def test_reg_inc(nb_points):
             print(f'nsteps {nsteps} nneurones {model.nb_hidden} training error {train_error}')
 
             features = model.get_features(data.x).detach()
-            old_model_values = model(data.x).detach() # DEBUG
-            residuals = data.y - old_model_values
+            residuals = data.y - model(data.x).detach()
             old_weight, old_bias = model.output.weight.detach().clone(), model.output.bias.detach().clone()
             data_loader = DataLoader(TensorDataset(features, residuals), batch_size=16, shuffle=True, drop_last=True)
             model.add_neurone(features)
