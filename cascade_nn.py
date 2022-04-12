@@ -44,12 +44,12 @@ class CascadeNN(nn.Module):
         self.output.weight.data[:] = 0.
         self.output.bias.data[:] = 0.
 
-    def forward_from_cascade_features(self, feat):
+    def forward_from_old_cascade_features(self, feat):
         return self.output(self.cascade_neurone_list[-1](feat))
 
     def merge_with_old_weight_n_bias(self, old_weight, old_bias):
         self.output.weight.data[:, :-1] += old_weight
-        self.output.bias.data[:-1] += old_bias
+        self.output.bias.data += old_bias
 
 
 class CosDataset(TensorDataset):
@@ -64,10 +64,10 @@ def test_reg_full(nb_points):
     data = CosDataset(nb_points)
 
     data_loader = DataLoader(data, batch_size=16, shuffle=True, drop_last=True)
-    model = CascadeNN(dim_input=1, dim_output=1, init_nb_hidden=10)
+    model = CascadeNN(dim_input=1, dim_output=1, init_nb_hidden=32)
     optim = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss = nn.MSELoss()
-    min_nsteps = 20000
+    min_nsteps = 50000
     nsteps = 0
 
     while nsteps < min_nsteps:
@@ -108,16 +108,19 @@ def test_reg_inc(nb_points):
             print(f'nsteps {nsteps} nneurones {model.nb_hidden} training error {train_error}')
 
             features = model.get_features(data.x).detach()
-            residuals = data.y - model(data.x).detach()
+            old_model_values = model(data.x).detach() # DEBUG
+            residuals = data.y - old_model_values
             old_weight, old_bias = model.output.weight.detach().clone(), model.output.bias.detach().clone()
             data_loader = DataLoader(TensorDataset(features, residuals), batch_size=16, shuffle=True, drop_last=True)
             model.add_neurone(features)
             optim = torch.optim.Adam([*model.cascade_neurone_list[-1].parameters(), *model.output.parameters()], lr=1e-3)
         for feat, residual in data_loader:
             optim.zero_grad()
-            loss(model.forward_from_cascade_features(feat), residual).backward()
+            loss(model.forward_from_old_cascade_features(feat), residual).backward()
             optim.step()
             nsteps += 1
+        print(f'\t nsteps {nsteps} nneurones {model.nb_hidden} residual error {loss(model.forward_from_old_cascade_features(feat), residual).item()}')
+
         epoch += 1
 
     model.merge_with_old_weight_n_bias(old_weight, old_bias)
