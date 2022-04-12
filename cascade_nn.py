@@ -119,8 +119,6 @@ def test_reg_inc(nb_points):
             loss(model.forward_from_old_cascade_features(feat), residual).backward()
             optim.step()
             nsteps += 1
-        print(f'\t nsteps {nsteps} nneurones {model.nb_hidden} residual error {loss(model.forward_from_old_cascade_features(feat), residual).item()}')
-
         epoch += 1
 
     model.merge_with_old_weight_n_bias(old_weight, old_bias)
