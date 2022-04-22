@@ -22,7 +22,7 @@ class CascadeNN(nn.Module):
         self.nb_hidden = init_nb_hidden
         self.cascade_neurone_list = []
         for k in range(init_nb_hidden):
-            self.cascade_neurone_list.append(CascadeNeurone(dim_input + k))
+            self.cascade_neurone_list.append(CascadeNeurone(dim_input + k, dim_output=1))
         self.cascade = nn.Sequential(*self.cascade_neurone_list)
         self.output = nn.Linear(dim_input + self.nb_hidden, dim_output)
         self.output.weight.data[:] = 0.
@@ -35,8 +35,8 @@ class CascadeNN(nn.Module):
         return self.cascade(x)
 
     def add_n_neurones(self, features, n=1):
-        new_neurone = CascadeNeurone(self.dim_input + self.nb_hidden, dim_output=n)
-        new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ features.t(), dim=1).detach()
+        new_neurone = CascadeNeurone(self.dim_input + self.nb_hidden, dim_output=n) 
+        new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ features.t(), dim=1).detach() # I DONT UNDERSTAND; could be related to paper?
         self.cascade_neurone_list.append(new_neurone)
         self.nb_hidden += n
         self.cascade = nn.Sequential(*self.cascade_neurone_list)
@@ -47,7 +47,7 @@ class CascadeNN(nn.Module):
     def forward_from_old_cascade_features(self, feat):
         return self.output(self.cascade_neurone_list[-1](feat))
 
-    def merge_with_old_weight_n_bias(self, old_weight, old_bias):
+    def merge_with_old_weight_n_bias(self, old_weight, old_bias): #shouldn't mean be better, though the sum is probably coming from the paper
         self.output.weight.data[:, :old_weight.shape[1]] += old_weight
         self.output.bias.data += old_bias
 
@@ -110,8 +110,8 @@ def test_reg_inc(nb_points):
             features = model.get_features(data.x).detach()
             residuals = data.y - model(data.x).detach()
             old_weight, old_bias = model.output.weight.detach().clone(), model.output.bias.detach().clone()
-            data_loader = DataLoader(TensorDataset(features, residuals), batch_size=16, shuffle=True, drop_last=True)
-            model.add_n_neurones(features)
+            data_loader = DataLoader(TensorDataset(features, residuals), batch_size=16, shuffle=True, drop_last=True) #dataset of features and residuals, the idea from some paper?
+            model.add_n_neurones(features) #add just one neuron
             optim = torch.optim.Adam([*model.cascade_neurone_list[-1].parameters(), *model.output.parameters()], lr=1e-3)
         for feat, residual in data_loader:
             optim.zero_grad()
@@ -119,6 +119,7 @@ def test_reg_inc(nb_points):
             optim.step()
             nsteps += 1
         epoch += 1
+    print(model)
 
     model.merge_with_old_weight_n_bias(old_weight, old_bias)
     plt.figure()
@@ -131,5 +132,5 @@ def test_reg_inc(nb_points):
 
 
 if __name__ == '__main__':
-    # test_reg_full(nb_points=128)
-    test_reg_inc(nb_points=128)
+    test_reg_full(nb_points=128)
+    # test_reg_inc(nb_points=128)
