@@ -102,7 +102,7 @@ def test_reg_inc(nb_points):
         if epoch % add_every_n_epoc == 0:
             # Merging old model with new if any
             if old_weight is not None:
-                model.merge_with_old_weight_n_bias(old_weight, old_bias)
+                model.merge_with_old_weight_n_bias(old_weight, old_bias) # add old weights of output (before adding the last new neurons) to updated output weights 
             with torch.no_grad():
                 train_error = loss(model(data.x), data.y).item()
             print(f'nsteps {nsteps} nneurones {model.nb_hidden} training error {train_error}')
@@ -111,11 +111,11 @@ def test_reg_inc(nb_points):
             residuals = data.y - model(data.x).detach()
             old_weight, old_bias = model.output.weight.detach().clone(), model.output.bias.detach().clone()
             data_loader = DataLoader(TensorDataset(features, residuals), batch_size=16, shuffle=True, drop_last=True) #dataset of features and residuals, the idea from some paper?
-            model.add_n_neurones(features) #add just one neuron
+            model.add_n_neurones(features) #add just one neuron, output weights are zero
             optim = torch.optim.Adam([*model.cascade_neurone_list[-1].parameters(), *model.output.parameters()], lr=1e-3)
         for feat, residual in data_loader:
             optim.zero_grad()
-            loss(model.forward_from_old_cascade_features(feat), residual).backward()
+            loss(model.forward_from_old_cascade_features(feat), residual).backward() #update new added neurons and output weights
             optim.step()
             nsteps += 1
         epoch += 1

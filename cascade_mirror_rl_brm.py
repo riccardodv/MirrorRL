@@ -23,10 +23,10 @@ class CascadeQ(CascadeNN):
         return self.qfunc(self.get_features(obs))
 
     def merge_q(self, old_output_model):
-        self.merge_with_old_weight_n_bias(self.qfunc.weight, self.qfunc.bias)
-        self.qfunc = clone_lin_model(self.output)
+        self.merge_with_old_weight_n_bias(self.qfunc.weight, self.qfunc.bias) #add qfunc weights to current weights (typically after training them)
+        self.qfunc = clone_lin_model(self.output) # synchronize qfunc weights with output weights
 
-        self.output.weight.data[:, :old_output_model.weight.shape[1]] += old_output_model.weight
+        self.output.weight.data[:, :old_output_model.weight.shape[1]] += old_output_model.weight #add old_output weights to current weights
         self.output.bias.data += old_output_model.bias
 
 
@@ -53,7 +53,7 @@ def main():
 
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
-    cascade_qfunc = CascadeQ(dim_s, nb_act)
+    cascade_qfunc = CascadeQ(dim_s, nb_act) #creation of the cascade network
     nb_iter = 200
     nb_samp_per_iter = 3000
     min_grad_steps_per_iter = 10000
@@ -73,7 +73,7 @@ def main():
         def softmax_policy(obs):
             with torch.no_grad():
                 obs = torch.tensor(obs)[None, :]
-                return torch.distributions.Categorical(logits=eta * cascade_qfunc(obs)).sample().squeeze(0).numpy()
+                return torch.distributions.Categorical(logits=eta * cascade_qfunc(obs)).sample().squeeze(0).numpy() #taking from output layer
         roll = env_sampler.rollouts(softmax_policy, min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter)
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
         merge_data_(data, roll, max_replay_memory_size)
@@ -86,16 +86,16 @@ def main():
 
         # add new neurone to cascade
         with torch.no_grad():
-            obs_feat = cascade_qfunc.get_features(obs)
-            nobs_feat = cascade_qfunc.get_features(nobs)
-            obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
-            obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
-            nobs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(nobs))
-            nobs_v = (cascade_qfunc.get_q(nobs) * nobs_old_distrib.probs).sum(1, keepdim=True)
+            obs_feat = cascade_qfunc.get_features(obs) #feat of cur state
+            nobs_feat = cascade_qfunc.get_features(nobs) # feat of next states
+            obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act) #q-value for current state; why gather? check?
+            obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs)) #cur policy distribution
+            nobs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(nobs)) #next policy distr
+            nobs_v = (cascade_qfunc.get_q(nobs) * nobs_old_distrib.probs).sum(1, keepdim=True) # v-value of next state; check?
             old_out = clone_lin_model(cascade_qfunc.output)
 
-        cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
-        optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(), *cascade_qfunc.output.parameters()], lr=lr_model)
+        cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter) # output layer weights are zeroed
+        optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(), *cascade_qfunc.output.parameters()], lr=lr_model) # we update only the newest added neurons and output layer 
         data_loader = DataLoader(
             TensorDataset(obs_feat, act, rwd, nobs_feat, nact, obs_q, nobs_v, nobs_old_distrib.probs, not_terminal),
             batch_size=batch_size, shuffle=True, drop_last=True)
@@ -103,19 +103,19 @@ def main():
         while grad_steps < min_grad_steps_per_iter:
             # train
             train_losses = []
-            for s, a, r, sp, ap, oldq, oldvp, oldprobp, n_ter in data_loader:
+            for s, a, r, sp, ap, oldq, oldvp, oldprobp, n_ter in data_loader: #next_actions are not used in the end
                 optim.zero_grad()
-                newqs = cascade_qfunc.forward_from_old_cascade_features(s)
-                newqsp = cascade_qfunc.forward_from_old_cascade_features(sp)
-                qs = newqs.gather(dim=1, index=a) + oldq
-                vsp = (newqsp * oldprobp).sum(1, keepdim=True) + oldvp
+                newqs = cascade_qfunc.forward_from_old_cascade_features(s) #from current state
+                newqsp = cascade_qfunc.forward_from_old_cascade_features(sp) # from next state
+                qs = newqs.gather(dim=1, index=a) + oldq #new q value of the cur state; sum comes from paper?
+                vsp = (newqsp * oldprobp).sum(1, keepdim=True) + oldvp #new v value of next state; sum comes from paper?
                 target = r + gamma * vsp * n_ter
                 loss = (qs - target).pow(2).mean()
                 train_losses.append(loss.item())
                 loss.backward()
                 optim.step()
                 grad_steps += 1
-            print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
+            print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}') # train losses should correspond to losses based on the residual computed by newly added neurons
 
         cascade_qfunc.merge_q(old_out)
         with torch.no_grad():
