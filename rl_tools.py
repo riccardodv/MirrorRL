@@ -62,7 +62,7 @@ class Sampler:
             if render:
                 self.env.render()
             nobs, rwd, done, terminal = self.env.step(act)
-            nact = self.policy(obs)
+            nact = self.policy(nobs)
             yield obs, act, rwd, done, terminal, nobs, nact
             obs = nobs
             act = nact
