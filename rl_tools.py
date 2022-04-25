@@ -1,5 +1,6 @@
 import numpy as np
 import warnings
+import torch
 
 
 def merge_data_(d1, d2, max_len):
@@ -62,7 +63,7 @@ class Sampler:
             if render:
                 self.env.render()
             nobs, rwd, done, terminal = self.env.step(act)
-            nact = self.policy(obs)
+            nact = self.policy(nobs)
             yield obs, act, rwd, done, terminal, nobs, nact
             obs = nobs
             act = nact
@@ -91,3 +92,18 @@ class Sampler:
             if paths[key].ndim == 1:
                 paths[key] = np.expand_dims(paths[key], axis=-1)
         return paths
+
+
+def update_logging_stats(rwds, dones, curr_cum_rwd, returns_list, total_ts):
+    for r, d in zip(rwds, dones):
+        curr_cum_rwd += r[0]
+        if d:
+            returns_list.append(curr_cum_rwd)
+            curr_cum_rwd = 0
+    return curr_cum_rwd, returns_list, total_ts + rwds.shape[0]
+
+
+def softmax_policy(obs, qfunc, eta):
+    with torch.no_grad():
+        obs = torch.tensor(obs)[None, :]
+        return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().squeeze(0).numpy()

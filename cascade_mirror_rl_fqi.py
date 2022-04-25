@@ -1,33 +1,9 @@
 import gym
 import numpy as np
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-from cascade_nn import CascadeNN
 from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
-
-
-def clone_lin_model(m):
-    ret = nn.Linear(m.in_features, m.out_features)
-    ret.weight.data = m.weight.detach().clone()
-    ret.bias.data = m.bias.detach().clone()
-    return ret
-
-
-class CascadeQ(CascadeNN):
-    def __init__(self, dim_input, dim_output):
-        super().__init__(dim_input, dim_output, init_nb_hidden=0)
-        self.qfunc = clone_lin_model(self.output)
-
-    def get_q(self, obs):
-        return self.qfunc(self.get_features(obs))
-
-    def merge_q(self, old_output_model):
-        self.merge_with_old_weight_n_bias(self.qfunc.weight, self.qfunc.bias)
-        self.qfunc = clone_lin_model(self.output)
-
-        self.output.weight.data[:, :old_output_model.weight.shape[1]] += old_output_model.weight
-        self.output.bias.data += old_output_model.bias
+from cascade_mirror_rl_brm import CascadeQ, clone_lin_model
 
 
 def main():
@@ -58,7 +34,7 @@ def main():
     total_ts = 0
     curr_cum_rwd = 0
     returns_list = []
-    eta = 1.
+    eta = .1
     for iter in range(nb_iter):
 
         roll = env_sampler.rollouts(lambda x: softmax_policy(x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter)
@@ -81,25 +57,25 @@ def main():
             nobs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(nobs))
             nobs_v = (cascade_qfunc.get_q(nobs) * nobs_old_distrib.probs).sum(1, keepdim=True)
             old_out = clone_lin_model(cascade_qfunc.output)
+            # q_target = rwd + gamma * nobs_q * not_terminal
 
         cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
         optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(), *cascade_qfunc.output.parameters()], lr=lr_model)
-        data_loader = DataLoader(
-            TensorDataset(obs_feat, act, rwd, nobs_feat, nact, obs_q, nobs_q, nobs_v, nobs_old_distrib.probs, not_terminal),
-            batch_size=batch_size, shuffle=True, drop_last=True)
+        # data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
         grad_steps = 0
         while grad_steps < min_grad_steps_per_iter:
             # train
             train_losses = []
-            for s, a, r, sp, ap, oldq, oldqp, oldvp, oldprobp, n_ter in data_loader:
+            with torch.no_grad():
+                newqsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)
+                q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal
+                data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
+
+            for s, a, oldq, tq in data_loader:
                 optim.zero_grad()
                 newqs = cascade_qfunc.forward_from_old_cascade_features(s)
-                newqsp = cascade_qfunc.forward_from_old_cascade_features(sp)
                 qs = newqs.gather(dim=1, index=a) + oldq
-                # vsp = (newqsp * oldprobp).sum(1, keepdim=True) + oldvp
-                vsp = newqsp.gather(dim=1, index=ap) + oldqp
-                target = r + gamma * vsp * n_ter
-                loss = (qs - target).pow(2).mean()
+                loss = (qs - tq).pow(2).mean()
                 train_losses.append(loss.item())
                 loss.backward()
                 optim.step()
