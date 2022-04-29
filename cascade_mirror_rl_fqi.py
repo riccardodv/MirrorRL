@@ -6,10 +6,17 @@ from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats
 from cascade_mirror_rl_brm import CascadeQ, clone_lin_model
 
 
+def stable_kl_div(old_probs, new_probs, epsilon = 1e-12):
+    new_probs = new_probs + epsilon
+    old_probs = old_probs + epsilon
+    kl = new_probs*torch.log(new_probs) - new_probs*torch.log(old_probs)
+    return kl
+
+
 def main():
     # env_id = 'MountainCar-v0'
-    env_id = 'CartPole-v1'
-    # env_id = 'Acrobot-v1'
+    #env_id = 'CartPole-v1'
+    env_id = 'Acrobot-v1'
     # env_id = 'LunarLander-v2'
     torch.set_num_threads(1)
 
@@ -21,7 +28,7 @@ def main():
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
     cascade_qfunc = CascadeQ(dim_s, nb_act)
-    nb_iter = 200
+    nb_iter = 100
     nb_samp_per_iter = 10000
     min_grad_steps_per_iter = 10000
     nb_add_neurone_per_iter = 10
@@ -66,14 +73,15 @@ def main():
         while grad_steps < min_grad_steps_per_iter:
             # train
             train_losses = []
+            deltas = []
             with torch.no_grad():
-                newqsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)
+                newqsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact) # q-value for the next state and actions taken in the next states
                 q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal
                 data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
 
             for s, a, oldq, tq in data_loader:
                 optim.zero_grad()
-                newqs = cascade_qfunc.forward_from_old_cascade_features(s)
+                newqs = cascade_qfunc.forward_from_old_cascade_features(s) 
                 qs = newqs.gather(dim=1, index=a) + oldq
                 loss = (qs - tq).pow(2).mean()
                 train_losses.append(loss.item())
@@ -82,10 +90,16 @@ def main():
                 grad_steps += 1
             print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
 
+
         cascade_qfunc.merge_q(old_out)
         with torch.no_grad():
             new_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
-            kl = torch.distributions.kl_divergence(obs_old_distrib, new_distrib).mean().item()
+            # kl = torch.distributions.kl_divergence(obs_old_distrib, new_distrib).mean().item()
+            kl = stable_kl_div(obs_old_distrib.probs, new_distrib.probs).mean().item()
+            if kl > 1e30:
+                print("KL is too large!")
+                print("obs_old_distrib.probs", obs_old_distrib.probs)
+                print("new_distrib", new_distrib.probs)
             normalized_entropy = new_distrib.entropy().mean().item() / np.log(nb_act)
             print(f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}')
 
