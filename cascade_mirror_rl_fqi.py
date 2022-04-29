@@ -24,7 +24,7 @@ def main():
     nb_iter = 200
     nb_samp_per_iter = 10000
     min_grad_steps_per_iter = 10000
-    nb_add_neurone_per_iter = 10
+    nb_add_neurone_per_iter = 1
 
     batch_size = 64
     lr_model = 1e-3
@@ -51,11 +51,12 @@ def main():
         with torch.no_grad():
             obs_feat = cascade_qfunc.get_features(obs)
             nobs_feat = cascade_qfunc.get_features(nobs)
+            nobs_q_all = cascade_qfunc.get_q(nobs)
             obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
-            nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact)
+            nobs_q = nobs_q_all.gather(dim=1, index=nact)
             obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
             nobs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(nobs))
-            nobs_v = (cascade_qfunc.get_q(nobs) * nobs_old_distrib.probs).sum(1, keepdim=True)
+            nobs_v = (nobs_q_all * nobs_old_distrib.probs).sum(1, keepdim=True)
             old_out = clone_lin_model(cascade_qfunc.output)
             # q_target = rwd + gamma * nobs_q * not_terminal
 
@@ -69,6 +70,11 @@ def main():
             with torch.no_grad():
                 newqsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)
                 q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal
+
+                # newqsp_all = cascade_qfunc.forward_from_old_cascade_features(nobs_feat)
+                # newvsp = (newqsp_all * nobs_old_distrib.probs).sum(1, keepdim=True)
+                # q_target = rwd + gamma * (newvsp + nobs_v) * not_terminal
+
                 data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
 
             for s, a, oldq, tq in data_loader:
