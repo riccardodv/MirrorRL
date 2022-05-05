@@ -1,0 +1,6 @@
+description: 'Acrobot by rlberry'
+seed: 123
+train_env: './configs/envs/acrobot.yaml'
+eval_env: './configs/envs/acrobot.yaml'
+agents:
+    - './configs/a2c/solving_acrobot.yaml' 
