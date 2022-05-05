@@ -12,7 +12,7 @@ init_kwargs:
     value_net_fn: 'rlberry.agents.torch.utils.training.model_factory_from_env'
     value_net_kwargs:
       type: "MultiLayerPerceptron"
-      layer_sizes": 
+      layer_sizes: 
         - 512
       reshape: False
       out_size: 1
