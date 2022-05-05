@@ -1,5 +1,5 @@
 description: 'Acrobot by rlberry'
-seed: 123
+seed: 23
 train_env: './configs/envs/acrobot.yaml'
 eval_env: './configs/envs/acrobot.yaml'
 agents:
