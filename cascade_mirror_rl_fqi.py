@@ -29,19 +29,20 @@ def main():
     dim_s = env.get_dim_obs()
     cascade_qfunc = CascadeQ(dim_s, nb_act)
     nb_iter = 100
-    nb_samp_per_iter = 10000
-    min_grad_steps_per_iter = 10000
-    nb_add_neurone_per_iter = 1
+    nb_samp_per_iter = 10000 # maybe rather 2000 or 3000?
+    min_grad_steps_per_iter = 10000 #important
+    nb_add_neurone_per_iter = 10 #to check
 
-    batch_size = 64
-    lr_model = 1e-3
+    batch_size = 64 # to check
+    lr_model = 1e-3 # maybe try higher
+    max_replay_memory_size = 10000 # to change accordingly with nb_samp_per_iter
+    eta = .1 #important
+
 
     data = {}
-    max_replay_memory_size = 10000
     total_ts = 0
     curr_cum_rwd = 0
     returns_list = []
-    eta = .1
     for iter in range(nb_iter):
 
         roll = env_sampler.rollouts(lambda x: softmax_policy(x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter)

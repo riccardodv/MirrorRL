@@ -3,6 +3,7 @@ init_kwargs:
     learning_rate: 0.0007
     optimizer_type: 'RMS_PROP'
     batch_size: 5
+    horizon: 500
 n_fit: 1
 fit_kwargs:
     fit_budget: 1000
