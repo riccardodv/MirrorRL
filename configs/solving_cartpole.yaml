@@ -1,0 +1,6 @@
+description: 'CartPole by rlberry'
+seed: 123
+train_env: './configs/envs/cartpole.yaml'
+eval_env: './configs/envs/cartpole.yaml'
+agents:
+    - './configs/a2c/solving_cartpole.yaml' 

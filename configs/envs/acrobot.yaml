@@ -1,0 +1,3 @@
+constructor: "rlberry.envs.gym_make"
+params:
+    id: "Acrobot-v1"
