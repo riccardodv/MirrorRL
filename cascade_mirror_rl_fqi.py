@@ -30,12 +30,6 @@ def run(env_id='CartPole-v1',
          gamma = .99
          ):
 
-    # env_id = 'MountainCar-v0'
-    # env_id = 'CartPole-v1'
-    # env_id = 'Acrobot-v1'
-    # env_id = 'LunarLander-v2'
-    # torch.set_num_threads(1)
-
     print('learning on', env_id)
     env = EnvWithTerminal(gym.make(env_id))
     env_sampler = Sampler(env)
@@ -44,16 +38,6 @@ def run(env_id='CartPole-v1',
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
     cascade_qfunc = CascadeQ(dim_s, nb_act)
-    # nb_iter = 100 # fix this fixed
-    # nb_samp_per_iter = 10000 # maybe rather 2000 or 3000?
-    # min_grad_steps_per_iter = 20000 # keep this fixed
-    # nb_add_neurone_per_iter = 10 # to check
-
-    # batch_size = 64 # to check
-    # lr_model = 1e-3 # maybe try higher
-    # max_replay_memory_size = 10000 # to change accordingly with nb_samp_per_iter
-    # eta = .1 #important
-    # gamma = .99
 
     data = {}
     total_ts = 0
@@ -140,6 +124,9 @@ def run(env_id='CartPole-v1',
 
 if __name__ == '__main__':
     env_id=['CartPole-v1']
+    # env_id = ['MountainCar-v0']
+    # env_id = ['Acrobot-v1']
+    # env_id = ['LunarLander-v2']
     nb_iter = [1] # fix this fixed
     nb_samp_per_iter = [10000] # maybe rather 2000 or 3000?
     min_grad_steps_per_iter = [20000] # keep this fixed
