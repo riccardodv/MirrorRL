@@ -107,3 +107,10 @@ def softmax_policy(obs, qfunc, eta):
     with torch.no_grad():
         obs = torch.tensor(obs)[None, :]
         return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().squeeze(0).numpy()
+
+
+def stable_kl_div(old_probs, new_probs, epsilon=1e-12):
+    new_probs = new_probs + epsilon
+    old_probs = old_probs + epsilon
+    kl = new_probs*torch.log(new_probs) - new_probs*torch.log(old_probs)
+    return kl

@@ -1,34 +1,48 @@
 import gym
 import numpy as np
-from psutil import cpu_count
+# from psutil import cpu_count
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
+from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, stable_kl_div
 from cascade_mirror_rl_brm import CascadeQ, clone_lin_model
 import itertools
 import os
-import multiprocessing as mp
 import pandas as pd
+from ray import tune
+from ray.tune import CLIReporter
+from ray.tune.schedulers import ASHAScheduler
+
+ENV_ID = "CartPole-v1"
+MAX_EPOCH = 3
 
 
-def stable_kl_div(old_probs, new_probs, epsilon=1e-12):
-    new_probs = new_probs + epsilon
-    old_probs = old_probs + epsilon
-    kl = new_probs*torch.log(new_probs) - new_probs*torch.log(old_probs)
-    return kl
+# def run(env_id='CartPole-v1',
+#          nb_iter=100,
+#          nb_samp_per_iter=10000,
+#          min_grad_steps_per_iter=20000,
+#          nb_add_neurone_per_iter=10,
+#          batch_size=64,
+#          lr_model=1e-3,
+#          max_replay_memory_size=10000,
+#          eta=.1,
+#          gamma = .99
+#          ):
+
+def run(config, checkpoint_dir=None):
+
+    env_id = ENV_ID
+    nb_iter = MAX_EPOCH
+    nb_samp_per_iter = config["nb_samp_per_iter"]
+    min_grad_steps_per_iter = config["min_grad_steps_per_iter"]
+    nb_add_neurone_per_iter = config["nb_add_neurone_per_iter"]
+    batch_size = config["batch_size"]
+    lr_model = config["lr_model"]
+    max_replay_memory_size = config["max_replay_memory_size"]
+    eta = config["eta"]
+    gamma = config["gamma"]
 
 
-def run(env_id='CartPole-v1',
-         nb_iter=100,
-         nb_samp_per_iter=10000,
-         min_grad_steps_per_iter=20000,
-         nb_add_neurone_per_iter=10,
-         batch_size=64,
-         lr_model=1e-3,
-         max_replay_memory_size=10000,
-         eta=.1,
-         gamma = .99
-         ):
+    
 
     print('learning on', env_id)
     env = EnvWithTerminal(gym.make(env_id))
@@ -113,41 +127,92 @@ def run(env_id='CartPole-v1',
             # kl = torch.distributions.kl_divergence(obs_old_distrib, new_distrib).mean().item()
             kl = stable_kl_div(obs_old_distrib.probs,
                                new_distrib.probs).mean().item()
-            if kl > 1e30:
-                print("KL is too large!")
-                print("obs_old_distrib.probs", obs_old_distrib.probs)
-                print("new_distrib", new_distrib.probs)
+            # if kl > 1e30:
+            #     print("KL is too large!")
+            #     print("obs_old_distrib.probs", obs_old_distrib.probs)
+            #     print("new_distrib", new_distrib.probs)
             normalized_entropy = new_distrib.entropy().mean().item() / np.log(nb_act)
             print(
                 f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}\n')
+        with tune.checkpoint_dir(iter) as checkpoint_dir:
+            path = os.path.join(checkpoint_dir, "checkpoint")
+            torch.save((cascade_qfunc.state_dict(), cascade_qfunc.state_dict()), path)
+
+        tune.report(average_reward=np.mean(returns_list[-20:]), 
+                    q_error_train= (np.mean(train_losses)), 
+                    kl=kl, 
+                    entropy = normalized_entropy)
+    print("Finished Training!")
+
+
+
+
+def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=1, gpus_per_trial=0):
+
+    config = {
+        "nb_samp_per_iter": tune.grid_search([10000]),
+        "min_grad_steps_per_iter": tune.grid_search([20000]),
+        "nb_add_neurone_per_iter": tune.grid_search([10]),
+        "batch_size": tune.grid_search([64]),
+        "lr_model": tune.grid_search([1e-3]),
+        "max_replay_memory_size": tune.grid_search([10000]),
+        "eta": tune.choice([.1, 1e-2, 1e-3]),
+        "gamma": tune.grid_search([0.99])
+        # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
+        # "lr": tune.loguniform(1e-4, 1e-1),
+        # "batch_size": tune.choice([2, 4, 8, 16])
+    }
+    scheduler = ASHAScheduler(
+        metric="average_reward",
+        mode="max",
+        max_t=max_num_epochs,
+        grace_period=min_epochs_per_trial,
+        reduction_factor=2)
+
+    reporter = CLIReporter(
+        # parameter_columns=["l1", "l2", "lr", "batch_size"],
+        metric_columns=["average_reward", "q_error_train", "kl", "entropy"])
+
+    result = tune.run(
+        run,
+        resources_per_trial={"cpu": 2, "gpu": gpus_per_trial},
+        config=config,
+        num_samples=num_samples,
+        scheduler=scheduler,
+        progress_reporter=reporter)
+
+    best_trial = result.get_best_trial("average_reward", "max", "last-10-avg")
+    print("Best trial config: {}".format(best_trial.config))
+    print("Best trial final q-error loss: {}".format(
+        best_trial.last_result["q_error_train"]))
+    print("Best trial final kl: {}".format(
+        best_trial.last_result["kl"]))
+    print("Best trial final entropy: {}".format(
+        best_trial.last_result["entropy"]))
+
+    print("best checkpoint dir: {}".format(
+        best_trial.checkpoint.value
+    ))
+
+
+    # best_trained_model = Net(best_trial.config["l1"], best_trial.config["l2"])
+    # device = "cpu"
+    # if torch.cuda.is_available():
+    #     device = "cuda:0"
+    #     if gpus_per_trial > 1:
+    #         best_trained_model = nn.DataParallel(best_trained_model)
+    # best_trained_model.to(device)
+
+    # best_checkpoint_dir = best_trial.checkpoint.value
+    # model_state, optimizer_state = torch.load(os.path.join(
+    #     best_checkpoint_dir, "checkpoint"))
+    # best_trained_model.load_state_dict(model_state)
+
+    # test_acc = test_accuracy(best_trained_model, device)
+    # print("Best trial test set accuracy: {}".format(test_acc))
+
+
 
 
 if __name__ == '__main__':
-    env_id=['CartPole-v1']
-    # env_id = ['MountainCar-v0']
-    # env_id = ['Acrobot-v1']
-    # env_id = ['LunarLander-v2']
-    nb_iter = [1] # fix this fixed
-    nb_samp_per_iter = [10000] # maybe rather 2000 or 3000?
-    min_grad_steps_per_iter = [20000] # keep this fixed
-    # nb_add_neurone_per_iter = [10, 20, 30] # to check
-    nb_add_neurone_per_iter = [10] # to check
-    batch_size = [64] # to check
-    # lr_model = [1e-3, 1e-2] # maybe try higher
-    lr_model = [1e-3] # maybe try higher
-    max_replay_memory_size = [10000] # to change accordingly with nb_samp_per_iter
-    eta = [.1, 1e-2, 1e-3] #important
-    gamma = [.99]
-
-    comb_pmts = itertools.product(env_id, nb_iter, nb_samp_per_iter, min_grad_steps_per_iter, nb_add_neurone_per_iter,
-                                                         batch_size, lr_model, max_replay_memory_size, eta, gamma)
-
-    cpu_num = os.cpu_count()
-    # for pmts in comb_pmts:
-    #     pmts = tuple(pmts)
-    cpu_num =1 
-    pool = mp.Pool(cpu_num) # mp.cpu_count()
-
-    _ = pool.starmap(run, comb_pmts)
-    pool.close()
-    pool.join()
+    main(4, MAX_EPOCH)
