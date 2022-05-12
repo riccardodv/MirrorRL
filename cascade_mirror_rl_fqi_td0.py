@@ -3,14 +3,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
-from cascade_mirror_rl_brm import CascadeQ, clone_lin_model
-
-
-def stable_kl_div(old_probs, new_probs, epsilon = 1e-12):
-    new_probs = new_probs + epsilon
-    old_probs = old_probs + epsilon
-    kl = new_probs*torch.log(new_probs) - new_probs*torch.log(old_probs)
-    return kl
+from cascade_mirror_rl_brm import CascadeQ
+from msc_tools import clone_lin_model, norm_squared_lin, stable_kl_div
 
 
 def main():
@@ -31,8 +25,10 @@ def main():
     nb_iter = 100
     nb_samp_per_iter = 10000
     min_grad_steps_per_iter = 10000
-    min_td0_steps_per_iter = 0
-    nb_add_neurone_per_iter = 20
+    min_td0_steps_per_iter = 10000
+    nb_add_neurone_per_iter = 10
+    norm_weight = 0.
+    neurone_nonlinearity = torch.nn.Tanh()
 
     batch_size = 64
     lr_model = 1e-3
@@ -69,7 +65,7 @@ def main():
             old_out = clone_lin_model(cascade_qfunc.output)
             # q_target = rwd + gamma * nobs_q * not_terminal
 
-        cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
+        cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter, non_linearity=neurone_nonlinearity)
         # data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
         grad_steps = 0
         # FQI
@@ -91,7 +87,7 @@ def main():
                 optim.zero_grad()
                 newqs = cascade_qfunc.forward_from_old_cascade_features(s)
                 qs = newqs.gather(dim=1, index=a) + oldq
-                loss = (qs - tq).pow(2).mean()
+                loss = (qs - tq).pow(2).mean() + norm_weight * (norm_squared_lin(cascade_qfunc.output) + norm_squared_lin(cascade_qfunc.cascade_neurone_list[-1].f[0]))
                 train_losses.append(loss.item())
                 loss.backward()
                 optim.step()
@@ -108,26 +104,18 @@ def main():
             with torch.no_grad():
                 new_obs_feat = cascade_qfunc.get_features(obs)
                 new_nobs_feat = cascade_qfunc.get_features(nobs)
-                phisa = torch.zeros(new_obs_feat.shape[0], new_obs_feat.shape[1], nb_act)
-                act_rep = act.repeat(1, dim_s)
-                phisa.scatter_(dim=-1, index=act_rep.unsqueeze(-1), src=new_obs_feat.unsqueeze(-1))
-                data_loader = DataLoader(TensorDataset(new_obs_feat, act, phisa, rwd, new_nobs_feat, nact, not_terminal, obs_q, nobs_q), batch_size=batch_size, shuffle=True, drop_last=True)
+                data_loader = DataLoader(TensorDataset(new_obs_feat, act, rwd, new_nobs_feat, nact, not_terminal, obs_q, nobs_q), batch_size=batch_size, shuffle=True, drop_last=True)
 
-            for phis, a, psa, r, phisp, ap, nt, oldqs, oldqsp in data_loader:
+            for phis, a, r, phisp, ap, nt, oldqs, oldqsp in data_loader:
                 optim_td0.zero_grad()
                 qs = cascade_qfunc.output(phis).gather(dim=1, index=a) + oldqs
                 qsp = cascade_qfunc.output(phisp).gather(dim=1, index=ap) + oldqsp
                 td = (r + gamma * qsp * nt).detach() - qs
-                loss = td.pow(2).mean()
+                loss = td.pow(2).mean() + norm_weight * (norm_squared_lin(cascade_qfunc.output) + norm_squared_lin(cascade_qfunc.cascade_neurone_list[-1].f[0]))
                 train_losses.append(loss.item())
 
-                td_sca = torch.zeros(td.shape[0], 1, nb_act)
-                td_sca.scatter_(dim=-1, index=a.unsqueeze(-1), src=td.unsqueeze(-1))
-                update = (td_sca * psa).sum(0).t()
-                cascade_qfunc.output.weight.data += lr_td0 * update
-                cascade_qfunc.output.bias.data += lr_td0 * td_sca.sum(0).squeeze(0)
-                # loss.backward()
-                # optim_td0.step()
+                loss.backward()
+                optim_td0.step()
 
                 grad_steps_td += 1
             print(f'\t grad_steps_td {grad_steps_td} q_error_train {np.mean(train_losses)} norm_squared_output '

@@ -5,13 +5,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from cascade_nn import CascadeNN
 from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
-
-
-def clone_lin_model(m):
-    ret = nn.Linear(m.in_features, m.out_features)
-    ret.weight.data = m.weight.detach().clone()
-    ret.bias.data = m.bias.detach().clone()
-    return ret
+from msc_tools import clone_lin_model
 
 
 class CascadeQ(CascadeNN):

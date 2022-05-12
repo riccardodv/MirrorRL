@@ -103,7 +103,12 @@ def update_logging_stats(rwds, dones, curr_cum_rwd, returns_list, total_ts):
     return curr_cum_rwd, returns_list, total_ts + rwds.shape[0]
 
 
-def softmax_policy(obs, qfunc, eta):
+def softmax_policy(obs, qfunc, eta, squeeze_out=True):
     with torch.no_grad():
-        obs = torch.tensor(obs)[None, :]
-        return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().squeeze(0).numpy()
+        if obs.ndim < 2:
+            obs = torch.tensor(obs)[None, :]
+        if squeeze_out:
+            return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().squeeze(0).numpy()
+        else:
+            return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().unsqueeze(1).numpy()
+
