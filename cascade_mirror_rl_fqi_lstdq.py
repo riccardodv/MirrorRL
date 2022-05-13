@@ -16,14 +16,11 @@ def main():
     # env_id = 'DiscretePendulum'
     env_id = 'Acrobot-v1'
     # env_id = 'LunarLander-v2'
-    # env_id = 'DiscreteBipedalWalker'
     # torch.set_num_threads(1)
 
     print('learning on', env_id)
     if env_id == 'DiscretePendulum':
         env = PendulumDiscrete()
-    elif env_id == 'DiscreteBipedalWalker':
-        env = BipedalWalkerDiscrete()
     else:
         env = EnvWithTerminal(gym.make(env_id))
     env_sampler = Sampler(env)
@@ -35,9 +32,10 @@ def main():
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
     cascade_qfunc = CascadeQ(dim_s, nb_act)
-    min_grad_steps_per_iter = 10000
+    min_grad_steps_per_iter = 20000
     nb_add_neurone_per_iter = 10
     neurone_non_linearity = torch.nn.Tanh()
+    use_lstd = True
 
     batch_size = 64
     lr_model = 1e-3
@@ -113,16 +111,20 @@ def main():
             else:
                 msbe = rwd + gamma * newqsp * not_terminal - newqs
             return msbe.pow(2).mean()
-        print(f'Starting LSTDQ, Mean Squared Bellman Error before LSTDQ {compute_msbe(True)}')
-        new_phis = cascade_qfunc.get_features_from_old_cascade_features(obs_feat)
-        new_phisp = cascade_qfunc.get_features_from_old_cascade_features(nobs_feat)
-        bias, weight = lstd_q(new_phis, act, rwd, new_phisp, nact, not_terminal, gamma, nb_act, add_bias=True)
-        cascade_qfunc.output.bias.data = bias
-        cascade_qfunc.output.weight.data = weight
-        print(f'Finished LSTDQ, Mean Squared Bellman Error after LSTDQ {compute_msbe(False)}')
+        if use_lstd:
+            print(f'Starting LSTDQ, Mean Squared Bellman Error before LSTDQ {compute_msbe(True)}')
+            new_phis = cascade_qfunc.get_features_from_old_cascade_features(obs_feat)
+            new_phisp = cascade_qfunc.get_features_from_old_cascade_features(nobs_feat)
+            bias, weight = lstd_q(new_phis, act, rwd, new_phisp, nact, not_terminal, gamma, nb_act, add_bias=True)
+            cascade_qfunc.output.bias.data = bias
+            cascade_qfunc.output.weight.data = weight
+            print(f'Finished LSTDQ, Mean Squared Bellman Error after LSTDQ {compute_msbe(False)}')
 
-        cascade_qfunc.qfunc = clone_lin_model(cascade_qfunc.output)
-        cascade_qfunc.merge_with_old_weight_n_bias(old_out.weight, old_out.bias)
+            cascade_qfunc.qfunc = clone_lin_model(cascade_qfunc.output)
+            cascade_qfunc.merge_with_old_weight_n_bias(old_out.weight, old_out.bias)
+        else:
+            cascade_qfunc.merge_q(old_out)
+
         with torch.no_grad():
             new_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
             # kl = torch.distributions.kl_divergence(obs_old_distrib, new_distrib).mean().item()

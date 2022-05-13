@@ -36,6 +36,7 @@ class CascadeNN(nn.Module):
 
     def add_n_neurones(self, features, n=1, non_linearity=nn.ReLU()):
         new_neurone = CascadeNeurone(self.dim_input + self.nb_hidden, dim_output=n, non_linearity=non_linearity)
+        new_neurone.f[0].weight.data /= 2 * (new_neurone.f[0].weight @ features.t()).abs().max(dim=1)[0].unsqueeze(1)
         new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ features.t(), dim=1).detach() # I DONT UNDERSTAND; could be related to paper?
         self.cascade_neurone_list.append(new_neurone)
         self.nb_hidden += n

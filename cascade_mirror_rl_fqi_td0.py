@@ -25,7 +25,7 @@ def main():
     nb_iter = 100
     nb_samp_per_iter = 10000
     min_grad_steps_per_iter = 10000
-    min_td0_steps_per_iter = 10000
+    min_td0_steps_per_iter = 0
     nb_add_neurone_per_iter = 10
     norm_weight = 0.
     neurone_nonlinearity = torch.nn.Tanh()
