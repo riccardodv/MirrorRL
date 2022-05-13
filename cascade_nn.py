@@ -10,8 +10,11 @@ class CascadeNeurone(nn.Module):
         super().__init__()
         self.f = nn.Sequential(nn.Linear(dim_input, out_features=dim_output), non_linearity)
 
-    def forward(self, x):
-        return torch.column_stack([x, self.f(x)])
+    def forward(self, x, stack=True):
+        if stack:
+            return torch.column_stack([x, self.f(x)])
+        else:
+            return self.f(x)
 
 
 class CascadeNN(nn.Module):
@@ -28,11 +31,20 @@ class CascadeNN(nn.Module):
         self.output.weight.data[:] = 0.
         self.output.bias.data[:] = 0.
 
-    def forward(self, x):
-        return self.output(self.get_features(x))
+    def forward(self, x, stack=True):
+        return self.output(self.get_features(x, stack))
 
-    def get_features(self, x):
-        return self.cascade(x)
+    def get_features(self, x, stack=True):
+        if stack:
+            return self.cascade(x)
+        else:
+            features = torch.zeros(x.shape[0], self.nb_hidden + x.shape[1])
+            features[:, :x.shape[1]] = x
+            for casc in self.cascade:
+                nb_in = casc.f[0].in_features
+                nb_out = casc.f[0].out_features
+                features[:, nb_in:nb_in+nb_out] = casc(features[:, :nb_in], stack=False)
+            return features
 
     def add_n_neurones(self, features, n=1, non_linearity=nn.ReLU()):
         new_neurone = CascadeNeurone(self.dim_input + self.nb_hidden, dim_output=n, non_linearity=non_linearity)

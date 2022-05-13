@@ -8,6 +8,7 @@ from msc_tools import clone_lin_model, stable_kl_div
 from bipedal_discrete import BipedalWalkerDiscrete
 from pendulum_discrete import PendulumDiscrete
 from lstdq_torch import lstd_q
+import time
 
 
 def main():
@@ -36,6 +37,7 @@ def main():
     nb_add_neurone_per_iter = 10
     neurone_non_linearity = torch.nn.Tanh()
     use_lstd = True
+    stack = False
 
     batch_size = 64
     lr_model = 1e-3
@@ -46,11 +48,13 @@ def main():
     returns_list = []
     eta = .1
     for iter in range(nb_iter):
-        roll = env_sampler.rollouts(lambda x: softmax_policy(x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter)
+        start_time = time.time()
+        roll = env_sampler.rollouts(lambda x: softmax_policy(x, lambda y: cascade_qfunc(y, stack), eta),
+                                    min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter)
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
         with torch.no_grad():
             if data:
-                data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']), cascade_qfunc, eta, squeeze_out=False)
+                data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']), lambda y: cascade_qfunc(y, stack), eta, squeeze_out=False)
 
         merge_data_(data, roll, max_replay_memory_size)
 
@@ -62,13 +66,13 @@ def main():
 
         # pre-computations before adding neurones to cascade
         with torch.no_grad():
-            obs_feat = cascade_qfunc.get_features(obs)
-            nobs_feat = cascade_qfunc.get_features(nobs)
-            nobs_q_all = cascade_qfunc.get_q(nobs)
-            obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
+            obs_feat = cascade_qfunc.get_features(obs, stack)
+            nobs_feat = cascade_qfunc.get_features(nobs, stack)
+            nobs_q_all = cascade_qfunc.get_q(nobs, stack)
+            obs_q = cascade_qfunc.get_q(obs, stack).gather(dim=1, index=act)
             nobs_q = nobs_q_all.gather(dim=1, index=nact)
-            obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
-            nobs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(nobs))
+            obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs, stack))
+            nobs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(nobs, stack))
             nobs_v = (nobs_q_all * nobs_old_distrib.probs).sum(1, keepdim=True)
             old_out = clone_lin_model(cascade_qfunc.output)
             # q_target = rwd + gamma * nobs_q * not_terminal
@@ -126,7 +130,7 @@ def main():
             cascade_qfunc.merge_q(old_out)
 
         with torch.no_grad():
-            new_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
+            new_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs, stack))
             # kl = torch.distributions.kl_divergence(obs_old_distrib, new_distrib).mean().item()
             kl = stable_kl_div(obs_old_distrib.probs, new_distrib.probs).mean().item()
             if kl > 1e30:
@@ -134,7 +138,8 @@ def main():
                 print("obs_old_distrib.probs", obs_old_distrib.probs)
                 print("new_distrib", new_distrib.probs)
             normalized_entropy = new_distrib.entropy().mean().item() / np.log(nb_act)
-            print(f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}')
+            print(f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}'
+                  f'iteration time {time.time() - start_time}')
 
 
 if __name__ == '__main__':

@@ -13,8 +13,8 @@ class CascadeQ(CascadeNN):
         super().__init__(dim_input, dim_output, init_nb_hidden=0)
         self.qfunc = clone_lin_model(self.output)
 
-    def get_q(self, obs):
-        return self.qfunc(self.get_features(obs))
+    def get_q(self, obs, stack=True):
+        return self.qfunc(self.get_features(obs, stack))
 
     def merge_q(self, old_output_model):
         self.merge_with_old_weight_n_bias(self.qfunc.weight, self.qfunc.bias)
