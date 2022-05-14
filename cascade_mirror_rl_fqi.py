@@ -13,7 +13,7 @@ from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
 ENV_ID = "CartPole-v1"
-MAX_EPOCH = 3
+MAX_EPOCH = 150
 
 
 # def run(env_id='CartPole-v1',
@@ -41,7 +41,9 @@ def run(config, checkpoint_dir=None):
     eta = config["eta"]
     gamma = config["gamma"]
 
-
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda:0"
     
 
     print('learning on', env_id)
@@ -53,6 +55,7 @@ def run(config, checkpoint_dir=None):
     dim_s = env.get_dim_obs()
     cascade_qfunc = CascadeQ(dim_s, nb_act)
 
+    cascade_qfunc.to(device)
     data = {}
     total_ts = 0
     curr_cum_rwd = 0
@@ -60,7 +63,7 @@ def run(config, checkpoint_dir=None):
     for iter in range(nb_iter):
 
         roll = env_sampler.rollouts(lambda x: softmax_policy(
-            x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter)
+            x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(
             roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
         merge_data_(data, roll, max_replay_memory_size)
@@ -69,6 +72,14 @@ def run(config, checkpoint_dir=None):
             torch.FloatTensor(data['rwd']), torch.FloatTensor(data['nobs']), torch.LongTensor(data['nact']),\
             1 - torch.FloatTensor(data['terminal'])
 
+        obs = obs.to(device)
+        act = act.to(device)
+        rwd = rwd.to(device)
+        nobs = nobs.to(device)
+        nact = nact.to(device)
+        not_terminal = not_terminal.to(device)
+
+
         print(
             f'iter {iter} ntransitions {total_ts} avr_return_last_20 {np.mean(returns_list[-20:])}')
 
@@ -76,6 +87,7 @@ def run(config, checkpoint_dir=None):
         with torch.no_grad():
             obs_feat = cascade_qfunc.get_features(obs)
             nobs_feat = cascade_qfunc.get_features(nobs)
+            print("Device of nobs", nobs.device)
             nobs_q_all = cascade_qfunc.get_q(nobs)
             obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
             nobs_q = nobs_q_all.gather(dim=1, index=nact)
@@ -88,6 +100,7 @@ def run(config, checkpoint_dir=None):
             # q_target = rwd + gamma * nobs_q * not_terminal
 
         cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
+        cascade_qfunc.to(device)
         optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
                                  *cascade_qfunc.output.parameters()], lr=lr_model)
         # data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
@@ -147,16 +160,16 @@ def run(config, checkpoint_dir=None):
 
 
 
-def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=1, gpus_per_trial=0):
+def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus_per_trial=0):
 
     config = {
         "nb_samp_per_iter": tune.grid_search([10000]),
-        "min_grad_steps_per_iter": tune.grid_search([20000]),
+        "min_grad_steps_per_iter": tune.grid_search([10000]),
         "nb_add_neurone_per_iter": tune.grid_search([10]),
         "batch_size": tune.grid_search([64]),
         "lr_model": tune.grid_search([1e-3]),
         "max_replay_memory_size": tune.grid_search([10000]),
-        "eta": tune.choice([.1, 1e-2, 1e-3]),
+        "eta": tune.loguniform(0.1, 10),
         "gamma": tune.grid_search([0.99])
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
@@ -167,7 +180,7 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=1, gpus_per_tri
         mode="max",
         max_t=max_num_epochs,
         grace_period=min_epochs_per_trial,
-        reduction_factor=2)
+        reduction_factor= rf)
 
     reporter = CLIReporter(
         # parameter_columns=["l1", "l2", "lr", "batch_size"],
@@ -215,4 +228,4 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=1, gpus_per_tri
 
 
 if __name__ == '__main__':
-    main(4, MAX_EPOCH)
+    main(4, MAX_EPOCH, 5, 2, 1)
