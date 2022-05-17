@@ -6,26 +6,29 @@ import numpy as np
 
 
 class CascadeNeurone(nn.Module):
-    def __init__(self, dim_input, dim_output, non_linearity=nn.ReLU()):
+    def __init__(self, nb_in, nb_out, dim_data_input, non_linearity=nn.ReLU()):
         super().__init__()
-        self.f = nn.Sequential(nn.Linear(dim_input, out_features=dim_output), non_linearity)
+        self.f = nn.Sequential(nn.Linear(nb_in, out_features=nb_out), non_linearity)
+        self.in_index = [k for k in range(dim_data_input)] + [k for k in range(dim_data_input - nb_in, 0, 1)]  # data input index + selected feature index
+        self.nb_in = nb_in
 
     def forward(self, x, stack=True):
+        in_x = x
+        if x.shape[1] > self.nb_in:
+            in_x = x[:, self.in_index]
         if stack:
-            return torch.column_stack([x, self.f(x)])
+            return torch.column_stack([x, self.f(in_x)])
         else:
-            return self.f(x)
+            return self.f(in_x)
 
 
 class CascadeNN(nn.Module):
-    def __init__(self, dim_input, dim_output, init_nb_hidden=0):
+    def __init__(self, dim_input, dim_output):
         super().__init__()
         self.dim_input = dim_input
         self.dim_output = dim_output
-        self.nb_hidden = init_nb_hidden
+        self.nb_hidden = 0
         self.cascade_neurone_list = []
-        for k in range(init_nb_hidden):
-            self.cascade_neurone_list.append(CascadeNeurone(dim_input + k, dim_output=1))
         self.cascade = nn.Sequential(*self.cascade_neurone_list)
         self.output = nn.Linear(dim_input + self.nb_hidden, dim_output)
         self.output.weight.data[:] = 0.
@@ -46,12 +49,15 @@ class CascadeNN(nn.Module):
                 features[:, nb_in:nb_in+nb_out] = casc(features[:, :nb_in], stack=False)
             return features
 
-    def add_n_neurones(self, features, n=1, non_linearity=nn.ReLU()):
-        new_neurone = CascadeNeurone(self.dim_input + self.nb_hidden, dim_output=n, non_linearity=non_linearity)
-        new_neurone.f[0].weight.data /= 2 * (new_neurone.f[0].weight @ features.t()).abs().max(dim=1)[0].unsqueeze(1)
-        new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ features.t(), dim=1).detach() # I DONT UNDERSTAND; could be related to paper?
+    def add_n_neurones(self, all_features, nb_inputs, n_neurones=1, non_linearity=nn.ReLU()):
+        assert nb_inputs > self.dim_input, f'nb_inputs must at least be larger than data dimensionality {self.dim_input}'
+        nb_inputs = min(nb_inputs, all_features.shape[1])
+        new_neurone = CascadeNeurone(nb_inputs, nb_out=n_neurones, dim_data_input=self.dim_input, non_linearity=non_linearity)
+        all_features = all_features[:, new_neurone.in_index]
+        new_neurone.f[0].weight.data /= 2 * (new_neurone.f[0].weight @ all_features.t()).abs().max(dim=1)[0].unsqueeze(1)
+        new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ all_features.t(), dim=1).detach() # I DONT UNDERSTAND; could be related to paper?
         self.cascade_neurone_list.append(new_neurone)
-        self.nb_hidden += n
+        self.nb_hidden += n_neurones
         self.cascade = nn.Sequential(*self.cascade_neurone_list)
         self.output = nn.Linear(self.dim_input + self.nb_hidden, self.dim_output)
         self.output.weight.data[:] = 0.
@@ -76,42 +82,16 @@ class CosDataset(TensorDataset):
         super().__init__(self.x, self.y)
 
 
-def test_reg_full(nb_points):
-    data = CosDataset(nb_points)
-
-    data_loader = DataLoader(data, batch_size=16, shuffle=True, drop_last=True)
-    model = CascadeNN(dim_input=1, dim_output=1, init_nb_hidden=32)
-    optim = torch.optim.Adam(model.parameters(), lr=1e-3)
-    loss = nn.MSELoss()
-    min_nsteps = 50000
-    nsteps = 0
-
-    while nsteps < min_nsteps:
-        train_error = []
-        for x, y in data_loader:
-            optim.zero_grad()
-            train_error.append(loss(model(x), y))
-            train_error[-1].backward()
-            optim.step()
-            nsteps += 1
-        print(f'nsteps {nsteps} training error {sum(train_error).item()/len(train_error)}')
-
-    plt.figure()
-    plt.plot(data.x, data.y, 'x')
-    x = torch.linspace(-5, 5, steps=1000)[:, None]
-    with torch.no_grad():
-        y = model(x)
-    plt.plot(x, y, '-')
-    plt.show()
-
-
 def test_reg_inc(nb_points):
     data = CosDataset(nb_points)
-    model = CascadeNN(dim_input=1, dim_output=1, init_nb_hidden=0)
+    model = CascadeNN(dim_input=1, dim_output=1)
     loss = nn.MSELoss()
     min_nsteps = 50000
     nsteps = 0
     add_every_n_epoc = 200
+    nb_added_neurones = 2
+    connect_last_k_features = 3 * nb_added_neurones
+    dim_data_input = 1
     epoch = 0
     old_weight, old_bias = None, None
     while nsteps < min_nsteps:
@@ -127,7 +107,7 @@ def test_reg_inc(nb_points):
             residuals = data.y - model(data.x).detach()
             old_weight, old_bias = model.output.weight.detach().clone(), model.output.bias.detach().clone()
             data_loader = DataLoader(TensorDataset(features, residuals), batch_size=16, shuffle=True, drop_last=True)  # dataset of features and residuals, the idea from some paper?
-            model.add_n_neurones(features)  # add just one neuron
+            model.add_n_neurones(features, nb_inputs=connect_last_k_features + dim_data_input, n_neurones=nb_added_neurones)  # add just one neuron
             optim = torch.optim.Adam([*model.cascade_neurone_list[-1].parameters(), *model.output.parameters()], lr=1e-3)
         for feat, residual in data_loader:
             optim.zero_grad()
@@ -148,5 +128,4 @@ def test_reg_inc(nb_points):
 
 
 if __name__ == '__main__':
-    # test_reg_full(nb_points=128)
     test_reg_inc(nb_points=128)

@@ -10,7 +10,7 @@ from msc_tools import clone_lin_model
 
 class CascadeQ(CascadeNN):
     def __init__(self, dim_input, dim_output):
-        super().__init__(dim_input, dim_output, init_nb_hidden=0)
+        super().__init__(dim_input, dim_output)
         self.qfunc = clone_lin_model(self.output)
 
     def get_q(self, obs, stack=True):
@@ -76,7 +76,7 @@ def main():
             nobs_v = (cascade_qfunc.get_q(nobs) * nobs_old_distrib.probs).sum(1, keepdim=True)
             old_out = clone_lin_model(cascade_qfunc.output)
 
-        cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
+        cascade_qfunc.add_n_neurones(obs_feat, n_neurones=nb_add_neurone_per_iter)
         optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(), *cascade_qfunc.output.parameters()], lr=lr_model)
         data_loader = DataLoader(
             TensorDataset(obs_feat, act, rwd, nobs_feat, nact, obs_q, nobs_q, nobs_v, nobs_old_distrib.probs, not_terminal),

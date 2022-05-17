@@ -65,7 +65,7 @@ def main():
             old_out = clone_lin_model(cascade_qfunc.output)
             # q_target = rwd + gamma * nobs_q * not_terminal
 
-        cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter, non_linearity=neurone_nonlinearity)
+        cascade_qfunc.add_n_neurones(obs_feat, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_nonlinearity)
         # data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
         grad_steps = 0
         # FQI

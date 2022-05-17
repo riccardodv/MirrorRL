@@ -85,7 +85,9 @@ def run(env_id='CartPole-v1',
             old_out = clone_lin_model(cascade_qfunc.output)
             # q_target = rwd + gamma * nobs_q * not_terminal
 
-        cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
+        cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nb_add_neurone_per_iter + dim_s,
+                                     n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
+        # cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=obs_feat.shape[1], n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
         # data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
         grad_steps = 0
         while grad_steps < min_grad_steps_per_iter:
@@ -143,6 +145,7 @@ if __name__ == '__main__':
     min_grad_steps_per_iter = [20000] # keep this fixed
     # nb_add_neurone_per_iter = [10, 20, 30] # to check
     nb_add_neurone_per_iter = [10] # to check
+
     batch_size = [64] # to check
     # lr_model = [1e-3, 1e-2] # maybe try higher
     lr_model = [1e-3] # maybe try higher
