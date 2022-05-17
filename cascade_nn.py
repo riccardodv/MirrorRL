@@ -4,14 +4,34 @@ from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 import numpy as np
 
+class PruneOutput(nn.Module):
+    def __init__(self, keep_features = None):
+        super().__init__()
+        self.keep_features = keep_features or 0
+    def forward(self, x):
+        return torch.tensor_split(x, (-self.keep_features,), dim = -1)[1]
+
 
 class CascadeNeurone(nn.Module):
-    def __init__(self, dim_input, dim_output):
+    def __init__(self, dim_input, dim_output, prune=None):
         super().__init__()
         self.f = nn.Sequential(nn.Linear(dim_input, out_features=dim_output), nn.ReLU())
+        self.dim_output = dim_output
+        self.prune = prune
+        # self.final_output = final_output
+        # if final_output != -1:
+        #     assert final_output >= dim_output
 
     def forward(self, x):
-        return torch.column_stack([x, self.f(x)])
+        # if self.final_output == -1:
+        #     ret = torch.column_stack([x, self.f(x)])
+        # else:
+        #     keep = self.final_output - self.dim_output
+        #     ret = torch.column_stack([x[:, keep:], self.f(x)])
+        if self.prune is not None:
+            x = self.prune(x)
+        ret = torch.column_stack([x, self.f(x)])
+        return ret
 
 
 class CascadeNN(nn.Module):
@@ -34,13 +54,23 @@ class CascadeNN(nn.Module):
     def get_features(self, x):
         return self.cascade(x)
 
-    def add_n_neurones(self, features, n=1):
-        new_neurone = CascadeNeurone(self.dim_input + self.nb_hidden, dim_output=n) 
-        new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ features.t().cpu(), dim=1).detach() # I DONT UNDERSTAND; could be related to paper?
+    def add_n_neurones(self, features, n=1, connectivity = None):
+        if connectivity is None or len(self.cascade_neurone_list) < connectivity:
+            input_size = self.dim_input + self.nb_hidden
+            prune_neurone = None
+        else:
+            input_size = sum([elem.dim_output for elem in self.cascade_neurone_list[-connectivity:]])
+            prune_neurone = PruneOutput(keep_features=input_size)
+            # self.cascade_neurone_list.append(prune_neurone)
+            features = prune_neurone(features)
+        assert features.shape[-1] == input_size
+        output_size = input_size + n
+        new_neurone = CascadeNeurone(input_size, dim_output=n, prune=prune_neurone) 
+        new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ features.t().cpu(), dim=1).detach()
         self.cascade_neurone_list.append(new_neurone)
         self.nb_hidden += n
         self.cascade = nn.Sequential(*self.cascade_neurone_list)
-        self.output = nn.Linear(self.dim_input + self.nb_hidden, self.dim_output)
+        self.output = nn.Linear(output_size, self.dim_output)
         self.output.weight.data[:] = 0.
         self.output.bias.data[:] = 0.
 
@@ -111,7 +141,7 @@ def test_reg_inc(nb_points):
             residuals = data.y - model(data.x).detach()
             old_weight, old_bias = model.output.weight.detach().clone(), model.output.bias.detach().clone()
             data_loader = DataLoader(TensorDataset(features, residuals), batch_size=16, shuffle=True, drop_last=True) #dataset of features and residuals, the idea from some paper?
-            model.add_n_neurones(features) #add just one neuron
+            model.add_n_neurones(features, n=2, connectivity=20) 
             optim = torch.optim.Adam([*model.cascade_neurone_list[-1].parameters(), *model.output.parameters()], lr=1e-3)
         for feat, residual in data_loader:
             optim.zero_grad()
@@ -132,5 +162,5 @@ def test_reg_inc(nb_points):
 
 
 if __name__ == '__main__':
-    test_reg_full(nb_points=128)
-    # test_reg_inc(nb_points=128)
+    # test_reg_full(nb_points=128)
+    test_reg_inc(nb_points=128)
