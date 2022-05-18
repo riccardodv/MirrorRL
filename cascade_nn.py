@@ -5,11 +5,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class PruneOutput(nn.Module):
-    def __init__(self, keep_features = None):
+    def __init__(self, dim_input, keep_features = None):
         super().__init__()
         self.keep_features = keep_features or 0
+        self.dim_input = dim_input
     def forward(self, x):
-        return torch.tensor_split(x, (-self.keep_features,), dim = -1)[1]
+        input, _, pruned_features = torch.tensor_split(x, (self.dim_input, -self.keep_features), dim = -1)
+        return torch.column_stack([input, pruned_features])
 
 
 class CascadeNeurone(nn.Module):
@@ -60,7 +62,8 @@ class CascadeNN(nn.Module):
             prune_neurone = None
         else:
             input_size = sum([elem.dim_output for elem in self.cascade_neurone_list[-connectivity:]])
-            prune_neurone = PruneOutput(keep_features=input_size)
+            prune_neurone = PruneOutput(self.dim_input, keep_features=input_size)
+            input_size = self.dim_input + input_size
             # self.cascade_neurone_list.append(prune_neurone)
             features = prune_neurone(features)
         assert features.shape[-1] == input_size
