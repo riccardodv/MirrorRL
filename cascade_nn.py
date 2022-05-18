@@ -69,6 +69,7 @@ class CascadeNN(nn.Module):
         assert features.shape[-1] == input_size
         output_size = input_size + n
         new_neurone = CascadeNeurone(input_size, dim_output=n, prune=prune_neurone) 
+        new_neurone.f[0].weight.data /= 2 * (new_neurone.f[0].weight @ features.t()).abs().max(dim=1)[0].unsqueeze(1)
         new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ features.t().cpu(), dim=1).detach()
         self.cascade_neurone_list.append(new_neurone)
         self.nb_hidden += n
