@@ -17,7 +17,8 @@ class CascadeNeurone(nn.Module):
         if x.shape[1] > self.nb_in:
             in_x = x[:, self.in_index]
         if stack:
-            return torch.column_stack([x, self.f(in_x)])
+            # return torch.column_stack([x, self.f(in_x)])
+            return torch.cat([x, self.f(in_x)], dim=1)
         else:
             return self.f(in_x)
 
@@ -50,7 +51,7 @@ class CascadeNN(nn.Module):
             return features
 
     def add_n_neurones(self, all_features, nb_inputs, n_neurones=1, non_linearity=nn.ReLU()):
-        assert nb_inputs > self.dim_input, f'nb_inputs must at least be larger than data dimensionality {self.dim_input}'
+        assert nb_inputs >= self.dim_input, f'nb_inputs must at least be larger than data dimensionality {self.dim_input}'
         nb_inputs = min(nb_inputs, all_features.shape[1])
         new_neurone = CascadeNeurone(nb_inputs, nb_out=n_neurones, dim_data_input=self.dim_input, non_linearity=non_linearity)
         all_features = all_features[:, new_neurone.in_index]
