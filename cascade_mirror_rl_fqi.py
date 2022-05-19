@@ -200,8 +200,8 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
         "max_replay_memory_size": tune.grid_search([10000]),
         #"eta": tune.loguniform(0.1, 10),
         "eta": tune.grid_search([0.1]),
-        "gamma": tune.grid_search([0.99])
-        "seed": tune.grid_search([1, 100, 1001, 2999])
+        "gamma": tune.grid_search([0.99]),
+        "seed": tune.grid_search([1, 11, 100, 1001, 2999])
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
