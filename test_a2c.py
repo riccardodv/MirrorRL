@@ -41,7 +41,7 @@ def main():
     }
 
 
-    def mlp(env, **kwargs):
+    def model_factory_from_size_configs(env, **kwargs):
         """
         Returns a default Q value network.
         """

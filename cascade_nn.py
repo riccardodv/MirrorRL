@@ -54,8 +54,8 @@ class CascadeNN(nn.Module):
         nb_inputs = min(nb_inputs, all_features.shape[1])
         new_neurone = CascadeNeurone(nb_inputs, nb_out=n_neurones, dim_data_input=self.dim_input, non_linearity=non_linearity)
         all_features = all_features[:, new_neurone.in_index]
-        new_neurone.f[0].weight.data /= 2 * (new_neurone.f[0].weight @ all_features.t()).abs().max(dim=1)[0].unsqueeze(1)
-        new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ all_features.t(), dim=1).detach() # I DONT UNDERSTAND; could be related to paper?
+        new_neurone.f[0].weight.data /= 2 * (new_neurone.f[0].weight @ all_features.t().cpu()).abs().max(dim=1)[0].unsqueeze(1)
+        new_neurone.f[0].bias.data = -torch.mean(new_neurone.f[0].weight @ all_features.t().cpu(), dim=1).detach() # I DONT UNDERSTAND; could be related to paper?
         self.cascade_neurone_list.append(new_neurone)
         self.nb_hidden += n_neurones
         self.cascade = nn.Sequential(*self.cascade_neurone_list)
