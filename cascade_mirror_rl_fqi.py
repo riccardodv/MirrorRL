@@ -15,6 +15,23 @@ from ray.tune.schedulers import ASHAScheduler
 ENV_ID = "CartPole-v1"
 MAX_EPOCH = 150
 
+default_config = {
+        "nb_samp_per_iter": 10000,
+        "min_grad_steps_per_iter": 10000,
+        "nb_add_neurone_per_iter": 10,
+        "batch_size": 64,
+        "lr_model": 1e-3,
+        "max_replay_memory_size": 10000,
+        "eta": 0.1,
+        "gamma": 0.99,
+        "seed": 1
+        # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
+        # "lr": tune.loguniform(1e-4, 1e-1),
+        # "batch_size": tune.choice([2, 4, 8, 16])
+    }
+ 
+
+
 
 # def run(env_id='CartPole-v1',
 #          nb_iter=100,
@@ -40,14 +57,24 @@ def run(config, checkpoint_dir=None):
     max_replay_memory_size = config["max_replay_memory_size"]
     eta = config["eta"]
     gamma = config["gamma"]
+    if "seed" in config.keys():
+        seed = config["seed"]
+    else:
+        seed = None
+
 
     device = "cpu"
     if torch.cuda.is_available():
+        print("I can run on CUDA")
         device = "cuda:0"
-    
+   
+    env = gym.make(env_id)
+    if seed is not None:
+        torch.manual_seed(seed)
+        env.seed(seed)
 
     print('learning on', env_id)
-    env = EnvWithTerminal(gym.make(env_id))
+    env = EnvWithTerminal(env)
     env_sampler = Sampler(env)
     
 
@@ -56,6 +83,8 @@ def run(config, checkpoint_dir=None):
     cascade_qfunc = CascadeQ(dim_s, nb_act)
 
     cascade_qfunc.to(device)
+
+    #print("\n\n\n DATA initially \n\n\n", [p for p in cascade_qfunc.parameters()], "\n\n\n")
     data = {}
     total_ts = 0
     curr_cum_rwd = 0
@@ -169,8 +198,10 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
         "batch_size": tune.grid_search([64]),
         "lr_model": tune.grid_search([1e-3]),
         "max_replay_memory_size": tune.grid_search([10000]),
-        "eta": tune.loguniform(0.1, 10),
-        "gamma": tune.grid_search([0.99])
+        #"eta": tune.loguniform(0.1, 10),
+        "eta": tune.grid_search([0.1]),
+        "gamma": tune.grid_search([0.99]),
+        "seed": tune.grid_search([1, 11, 100, 1001, 2999])
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
@@ -228,4 +259,5 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
 
 
 if __name__ == '__main__':
-    main(4, MAX_EPOCH, 5, 2, 1)
+    main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
+    #run(default_config)
