@@ -89,7 +89,7 @@ def main():
                 optim.zero_grad()
                 newqs = cascade_qfunc.forward_from_old_cascade_features(s)
                 newqsp = cascade_qfunc.forward_from_old_cascade_features(sp)
-                qs = newqs.gather(dim=1, index=a) + oldq
+                qs = newqs.gather(dim=1, index=a) + oldq # in the other file it is nact, which is next action ISSUE
                 # vsp = (newqsp * oldprobp).sum(1, keepdim=True) + oldvp
                 vsp = newqsp.gather(dim=1, index=ap) + oldqp
                 target = r + gamma * vsp * n_ter

@@ -54,21 +54,27 @@ class Sampler:
         self.policy = None
         self.env = env
 
-    def _rollout(self, render=False):
+    def _rollout(self, render=False, device = None):
         # Generates SARSA type transitions until episode's end
         obs = self.env.reset()
-        act = self.policy(obs)
+        obs_tensor = torch.FloatTensor(obs)
+        if device:
+            obs_tensor = obs_tensor.to(device)
+        act = self.policy(obs_tensor)
         done = False
         while not done:
             if render:
                 self.env.render()
             nobs, rwd, done, terminal = self.env.step(act)
-            nact = self.policy(nobs)
+            nobs_tensor = torch.FloatTensor(nobs)
+            if device:
+                nobs_tensor = nobs_tensor.to(device)
+            nact = self.policy(nobs_tensor)
             yield obs, act, rwd, done, terminal, nobs, nact
             obs = nobs
             act = nact
 
-    def rollouts(self, policy, min_trans, max_trans, render=False):
+    def rollouts(self, policy, min_trans, max_trans, render=False, device = None):
         # Keep calling rollout and saving the resulting path until at least min_trans transitions are collected
         assert (min_trans <= max_trans)
         self.policy = policy
@@ -85,7 +91,7 @@ class Sampler:
                     max_reached = True
                     break
             if not max_reached:
-                self.curr_rollout = self._rollout(render)
+                self.curr_rollout = self._rollout(render, device)
 
         for key in set(keys):
             paths[key] = np.asarray(paths[key])
@@ -108,7 +114,8 @@ def softmax_policy(obs, qfunc, eta, squeeze_out=True):
         if obs.ndim < 2:
             obs = torch.tensor(obs)[None, :]
         if squeeze_out:
-            return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().squeeze(0).numpy()
+            return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().squeeze(0).cpu().numpy()
         else:
-            return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().unsqueeze(1).numpy()
+            return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().unsqueeze(1).cpu().numpy()
+
 
