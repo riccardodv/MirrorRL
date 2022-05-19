@@ -228,4 +228,4 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
 
 
 if __name__ == '__main__':
-    main(4, MAX_EPOCH, 5, 2, 1)
+    main(4, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
