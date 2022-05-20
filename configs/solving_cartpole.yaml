@@ -3,4 +3,5 @@ seed: 123
 train_env: './configs/envs/cartpole.yaml'
 eval_env: './configs/envs/cartpole.yaml'
 agents:
-    - './configs/a2c/solving_cartpole.yaml' 
+    - './configs/a2c/a2c_cartpole.yaml' 
+    - './configs/dqn/dqn_cartpole.yaml'
