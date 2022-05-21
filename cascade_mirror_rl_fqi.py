@@ -1,10 +1,15 @@
 import gym
 import numpy as np
+# from psutil import cpu_count
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, stable_kl_div
-from cascade_mirror_rl_brm import CascadeQ, clone_lin_model
+from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
+from cascade_mirror_rl_brm import CascadeQ
+from msc_tools import clone_lin_model, stable_kl_div
+import itertools
 import os
+import pandas as pd
+from pendulum_discrete import PendulumDiscrete
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
@@ -65,19 +70,27 @@ def run(config, checkpoint_dir=None):
         print("I can run on CUDA")
         device = "cuda:0"
    
-    env = gym.make(env_id)
-    if seed is not None:
-        torch.manual_seed(seed)
-        env.seed(seed)
+    # env = gym.make(env_id)
+
 
     print('learning on', env_id)
-    env = EnvWithTerminal(env)
+
+    if env_id == 'DiscretePendulum':
+        env = PendulumDiscrete()
+    else:
+        env = EnvWithTerminal(gym.make(env_id))
+    
+    if seed is not None:
+        torch.manual_seed(seed)
+        env.env.seed(seed)
+    
     env_sampler = Sampler(env)
     
 
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
     cascade_qfunc = CascadeQ(dim_s, nb_act)
+    neurone_non_linearity = torch.nn.Tanh()
 
     cascade_qfunc.to(device)
 
@@ -92,6 +105,11 @@ def run(config, checkpoint_dir=None):
             x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(
             roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
+
+        with torch.no_grad():
+            if data:
+                data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']), cascade_qfunc, eta, squeeze_out=False)
+
         merge_data_(data, roll, max_replay_memory_size)
 
         obs, act, rwd, nobs, nact, not_terminal = torch.FloatTensor(data['obs']), torch.LongTensor(data['act']), \
@@ -125,10 +143,11 @@ def run(config, checkpoint_dir=None):
             old_out = clone_lin_model(cascade_qfunc.output)
             # q_target = rwd + gamma * nobs_q * not_terminal
 
-        cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
+        # cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nb_add_neurone_per_iter + dim_s,
+        #                              n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
+        cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=obs_feat.shape[1], n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
+        # cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
         cascade_qfunc.to(device)
-        optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
-                                 *cascade_qfunc.output.parameters()], lr=lr_model)
         # data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
         grad_steps = 0
         while grad_steps < min_grad_steps_per_iter:
@@ -138,19 +157,20 @@ def run(config, checkpoint_dir=None):
             with torch.no_grad():
                 newqsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(
                     dim=1, index=nact)  # q-value for the next state and actions taken in the next states
-                q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal
+                q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal - obs_q
 
                 # newqsp_all = cascade_qfunc.forward_from_old_cascade_features(nobs_feat)
                 # newvsp = (newqsp_all * nobs_old_distrib.probs).sum(1, keepdim=True)
                 # q_target = rwd + gamma * (newvsp + nobs_v) * not_terminal
 
                 data_loader = DataLoader(TensorDataset(
-                    obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
-
-            for s, a, oldq, tq in data_loader:
+                    obs_feat, act, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
+            optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
+                                      *cascade_qfunc.output.parameters()], lr=lr_model)
+            for s, a, tq in data_loader:
                 optim.zero_grad()
                 newqs = cascade_qfunc.forward_from_old_cascade_features(s)
-                qs = newqs.gather(dim=1, index=a) + oldq
+                qs = newqs.gather(dim=1, index=a)
                 loss = (qs - tq).pow(2).mean()
                 train_losses.append(loss.item())
                 loss.backward()
@@ -187,7 +207,6 @@ def run(config, checkpoint_dir=None):
 
 
 def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus_per_trial=0):
-    
     # config for cartpole
     # config = {
     #     "nb_samp_per_iter": tune.grid_search([10000]),
@@ -204,7 +223,6 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
     #     # "lr": tune.loguniform(1e-4, 1e-1),
     #     # "batch_size": tune.choice([2, 4, 8, 16])
     # }
-
     # config for acrobot
     config = {
         "nb_samp_per_iter": tune.grid_search([10000]),
@@ -221,6 +239,7 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
     }
+
 
     scheduler = ASHAScheduler(
         metric="average_reward",
