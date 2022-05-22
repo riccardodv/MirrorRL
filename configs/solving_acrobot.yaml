@@ -3,5 +3,5 @@ seed: 23
 train_env: './configs/envs/acrobot.yaml'
 eval_env: './configs/envs/acrobot.yaml'
 agents:
-    - './configs/a2c/a2c_cartpole.yaml' 
-    - './configs/dqn/dqn_cartpole.yaml'
+    - './configs/a2c/a2c_acrobot.yaml' 
+    - './configs/dqn/dqn_acrobot.yaml'
