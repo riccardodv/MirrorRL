@@ -14,7 +14,7 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
-ENV_ID = "CartPole-v1"
+ENV_ID = "Acrobot-v1"
 MAX_EPOCH = 100
 
 default_config = {
