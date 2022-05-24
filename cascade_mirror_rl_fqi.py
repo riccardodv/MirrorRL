@@ -3,7 +3,7 @@ import numpy as np
 # from psutil import cpu_count
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
+from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
 from cascade_mirror_rl_brm import CascadeQ
 from msc_tools import clone_lin_model, stable_kl_div
 import itertools
@@ -14,12 +14,14 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
+# ENV_ID = "CartPole-v1"
 ENV_ID = "Acrobot-v1"
+# ENV_ID = "DiscretePendulum"
 MAX_EPOCH = 100
 
 default_config = {
         "nb_samp_per_iter": 10000,
-        "min_grad_steps_per_iter": 10000,
+        "min_grad_steps_per_iter": 5000,
         "nb_add_neurone_per_iter": 10,
         "batch_size": 64,
         "lr_model": 1e-3,
@@ -47,7 +49,7 @@ default_config = {
 #          gamma = .99
 #          ):
 
-def run(config, checkpoint_dir=None):
+def run(config, checkpoint_dir=None, save_model_dir=None):
 
     env_id = ENV_ID
     nb_iter = MAX_EPOCH
@@ -59,6 +61,7 @@ def run(config, checkpoint_dir=None):
     max_replay_memory_size = config["max_replay_memory_size"]
     eta = config["eta"]
     gamma = config["gamma"]
+    lam = 0.
     if "seed" in config.keys():
         seed = config["seed"]
     else:
@@ -158,6 +161,7 @@ def run(config, checkpoint_dir=None):
                 newqsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(
                     dim=1, index=nact)  # q-value for the next state and actions taken in the next states
                 q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal - obs_q
+                # q_target = get_targets_qvals((nobs_q + newqsp) * not_terminal, rwd, data['done'], gamma, lam) - obs_q
 
                 # newqsp_all = cascade_qfunc.forward_from_old_cascade_features(nobs_feat)
                 # newvsp = (newqsp_all * nobs_old_distrib.probs).sum(1, keepdim=True)
@@ -201,12 +205,12 @@ def run(config, checkpoint_dir=None):
                     q_error_train= (np.mean(train_losses)), 
                     kl=kl, 
                     entropy = normalized_entropy)
+    if save_model_dir is not None:
+        torch.save(cascade_qfunc, os.path.join(save_model_dir, 'cascade_qfunc_default.pt'))
     print("Finished Training!")
 
 
-
-
-def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus_per_trial=0):
+def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpus_per_trial=0.):
     # config for cartpole
     # config = {
     #     "nb_samp_per_iter": tune.grid_search([10000]),
@@ -239,7 +243,6 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
     }
-
 
     scheduler = ASHAScheduler(
         metric="average_reward",
@@ -291,8 +294,6 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
     # print("Best trial test set accuracy: {}".format(test_acc))
 
 
-
-
 if __name__ == '__main__':
-    main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
-    #run(default_config)
+    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
+    run(default_config, save_model_dir='models')
