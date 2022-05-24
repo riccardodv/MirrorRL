@@ -119,3 +119,12 @@ def softmax_policy(obs, qfunc, eta, squeeze_out=True):
             return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().unsqueeze(1).cpu().numpy()
 
 
+def get_targets_qvals(q_values_next, rwd, done, discount, lam):
+    q_targets = torch.zeros_like(q_values_next)
+    for k in reversed(range(len(q_values_next))):
+        if done[k] or k == len(q_values_next) - 1:  # this is a new path
+            q_targets[k] = rwd[k] + discount * q_values_next[k]
+        else:
+            q_targets[k] = (1 - lam) * (rwd[k] + discount * q_values_next[k])\
+                               + lam * (rwd[k] + discount * q_targets[k + 1])
+    return q_targets
