@@ -2,7 +2,7 @@ agent_class: 'rlberry.agents.torch.A2CAgent'
 init_kwargs:
     learning_rate: 0.0007
     optimizer_type: 'RMS_PROP'
-    batch_size: 5
+    batch_size: 200
     policy_net_fn: 'rlberry.agents.torch.utils.training.model_factory_from_env'
     policy_net_kwargs:
       type: 'MultiLayerPerceptron'
@@ -16,12 +16,11 @@ init_kwargs:
         - 512
       reshape: False
       out_size: 1
-    horizon: 500
     entr_coef: 0.01
 eval_kwargs:
     eval_horizon: 200
 n_fit: 1
 fit_kwargs:
-    fit_budget: 1000
+    fit_budget: 1_000_000
 agent_name: "A2C rlberry agent for Acrobot"
 
