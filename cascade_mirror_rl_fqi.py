@@ -12,7 +12,7 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
-ENV_ID = "Acrobot-v1"
+ENV_ID = "LunarLander-v2"
 MAX_EPOCH = 100
 
 
@@ -179,6 +179,23 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
     #     # "batch_size": tune.choice([2, 4, 8, 16])
     # }
     # config for acrobot
+    # config = {
+    #     "nb_samp_per_iter": tune.grid_search([10000]),
+    #     "min_grad_steps_per_iter": tune.grid_search([10000]),
+    #     "nb_add_neurone_per_iter": tune.grid_search([10, 20, 50]),
+    #     "batch_size": tune.grid_search([64]),
+    #     "lr_model": tune.grid_search([1e-3]),
+    #     "max_replay_memory_size": tune.grid_search([10000]),
+    #     #"eta": tune.loguniform(0.1, 10),
+    #     "eta": tune.grid_search([0.1, 0.5, 1, 2]),
+    #     "gamma": tune.grid_search([0.99]),
+    #     "seed": tune.grid_search([1, 11, 100])
+    #     # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
+    #     # "lr": tune.loguniform(1e-4, 1e-1),
+    #     # "batch_size": tune.choice([2, 4, 8, 16])
+    # }
+
+    # config for luna lander
     config = {
         "nb_samp_per_iter": tune.grid_search([10000]),
         "min_grad_steps_per_iter": tune.grid_search([10000]),
@@ -187,13 +204,14 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2, gpus
         "lr_model": tune.grid_search([1e-3]),
         "max_replay_memory_size": tune.grid_search([10000]),
         #"eta": tune.loguniform(0.1, 10),
-        "eta": tune.grid_search([0.1, 0.5, 1, 2]),
+        "eta": tune.grid_search([0.01, 0.1, 0.5]),
         "gamma": tune.grid_search([0.99]),
-        "seed": tune.grid_search([1, 11, 100])
+        "seed": tune.grid_search([1, 11, 100, 17, 21])
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
     }
+
 
     scheduler = ASHAScheduler(
         metric="average_reward",
