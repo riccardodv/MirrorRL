@@ -16,9 +16,9 @@ init_kwargs:
         - 512
       reshape: False
       out_size: 1
-    entr_coef: 0.01
-eval_kwargs:
-    eval_horizon: 200
+#     entr_coef: 0.01
+# eval_kwargs:
+#     eval_horizon: 200
 n_fit: 1
 fit_kwargs:
     fit_budget: 1_000_000
