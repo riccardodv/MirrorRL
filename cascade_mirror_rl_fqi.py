@@ -67,7 +67,6 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     else:
         seed = None
 
-
     device = "cpu"
     if torch.cuda.is_available():
         print("I can run on CUDA")
@@ -148,7 +147,12 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         # cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nb_add_neurone_per_iter + dim_s,
         #                              n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
-        cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=obs_feat.shape[1], n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
+        nbInputs = obs_feat.shape[1]
+        if "nb_inputs" in config.keys():
+            if config["nb_inputs"] >= dim_s:
+                nbInputs = config["nb_inputs"]
+
+        cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nbInputs, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
         # cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
         cascade_qfunc.to(device)
         # data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
@@ -238,7 +242,8 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         #"eta": tune.loguniform(0.1, 10),
         "eta": tune.grid_search([0.1]), # the smaller the better, best around 0.1, 0.5
         "gamma": tune.grid_search([0.99]),
-        "seed": tune.grid_search([1, 11, 17, 23, 100])
+        "seed": tune.grid_search([1, 11, 17, 23, 100]),
+        "nb_inputs": tune.grid_search([-1]) #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
