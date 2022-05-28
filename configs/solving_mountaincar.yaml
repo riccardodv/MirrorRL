@@ -1,0 +1,7 @@
+description: 'Mountaincar by rlberry'
+seed: 23
+train_env: './configs/envs/mountaincar.yaml'
+eval_env: './configs/envs/mountaincar.yaml'
+agents:
+    - './configs/a2c/a2c_mountaincar.yaml' 
+    - './configs/dqn/dqn_mountaincar.yaml'
