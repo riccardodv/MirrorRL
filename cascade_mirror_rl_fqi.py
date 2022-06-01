@@ -15,9 +15,9 @@ from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
 # ENV_ID = "CartPole-v1"
-ENV_ID = "Acrobot-v1"
-# ENV_ID = "DiscretePendulum"
-MAX_EPOCH = 150
+# ENV_ID = "Acrobot-v1"
+ENV_ID = "DiscretePendulum"
+MAX_EPOCH = 100
 
 default_config = {
         "nb_samp_per_iter": 10000,
@@ -51,8 +51,8 @@ default_config = {
 
 def run(config, checkpoint_dir=None, save_model_dir=None):
 
-    env_id = ENV_ID
-    nb_iter = MAX_EPOCH
+    env_id = config["env_id"]
+    nb_iter = config["max_epoch"]
     nb_samp_per_iter = config["nb_samp_per_iter"]
     min_grad_steps_per_iter = config["min_grad_steps_per_iter"]
     nb_add_neurone_per_iter = config["nb_add_neurone_per_iter"]
@@ -243,7 +243,9 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         "eta": tune.grid_search([0.1]), # the smaller the better, best around 0.1, 0.5
         "gamma": tune.grid_search([0.99]),
         "seed": tune.grid_search([1, 11, 17, 23, 100]),
-        "nb_inputs": tune.grid_search([-1]) #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
+        "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
+        "env_id" : tune.grid_search([ENV_ID]), 
+        "max_epoch": tune.grid_search([MAX_EPOCH])
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
