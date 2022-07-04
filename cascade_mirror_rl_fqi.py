@@ -1,6 +1,5 @@
 import gym
 import numpy as np
-# from psutil import cpu_count
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
@@ -20,6 +19,8 @@ ENV_ID = "DiscretePendulum"
 MAX_EPOCH = 15
 
 default_config = {
+        "env_id": ENV_ID,
+        "max_epoch" : MAX_EPOCH,
         "nb_samp_per_iter": 10000,
         "min_grad_steps_per_iter": 10000,
         "nb_add_neurone_per_iter": 10,
@@ -237,14 +238,14 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
     config = {
         "nb_samp_per_iter": tune.grid_search([10000]),
         "min_grad_steps_per_iter": tune.grid_search([10000]),
-        "nb_add_neurone_per_iter": tune.grid_search([10, 20, 50]),
+        "nb_add_neurone_per_iter": tune.grid_search([10]),
         "batch_size": tune.grid_search([64]),
         "lr_model": tune.grid_search([1e-3]),
         "max_replay_memory_size": tune.grid_search([10000]),
         #"eta": tune.loguniform(0.1, 10),
         "eta": tune.grid_search([0.1]), # the smaller the better, best around 0.1, 0.5
         "gamma": tune.grid_search([0.99]),
-        "seed": tune.grid_search([1, 11, 17, 23, 100]),
+        "seed": tune.grid_search([1]),
         "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
         "env_id" : tune.grid_search([ENV_ID]), 
         "max_epoch": tune.grid_search([MAX_EPOCH])
@@ -266,7 +267,7 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
 
     result = tune.run(
         run,
-        resources_per_trial={"cpu": 2, "gpu": gpus_per_trial},
+        resources_per_trial={"cpu": 1, "gpu": gpus_per_trial},
         config=config,
         num_samples=num_samples,
         scheduler=scheduler,
@@ -305,4 +306,5 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
 
 if __name__ == '__main__':
     # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
+    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
     run(default_config, save_model_dir='models')
