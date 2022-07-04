@@ -14,21 +14,21 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
-# ENV_ID = "CartPole-v1"
-ENV_ID = "Acrobot-v1"
+ENV_ID = "CartPole-v1"
+# ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 MAX_EPOCH = 100
 
 default_config = {
         "nb_samp_per_iter": 10000,
-        "min_grad_steps_per_iter": 5000,
+        "min_grad_steps_per_iter": 10000,
         "nb_add_neurone_per_iter": 10,
         "batch_size": 64,
         "lr_model": 1e-3,
         "max_replay_memory_size": 10000,
         "eta": 0.1,
         "gamma": 0.99,
-        "seed": 1
+        "seed": 0
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
@@ -206,7 +206,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
                     kl=kl, 
                     entropy = normalized_entropy)
     if save_model_dir is not None:
-        torch.save(cascade_qfunc, os.path.join(save_model_dir, 'cascade_qfunc_default.pt'))
+        torch.save(cascade_qfunc, os.path.join(save_model_dir, f'cascade_qfunc_{ENV_ID}.pt'))
     print("Finished Training!")
 
 
