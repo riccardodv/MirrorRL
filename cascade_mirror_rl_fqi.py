@@ -14,8 +14,8 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
-ENV_ID = "CartPole-v1"
-# ENV_ID = "Acrobot-v1"
+# ENV_ID = "CartPole-v1"
+ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 MAX_EPOCH = 100
 
@@ -51,8 +51,8 @@ default_config = {
 
 def run(config, checkpoint_dir=None, save_model_dir=None):
 
-    env_id = ENV_ID
-    nb_iter = MAX_EPOCH
+    env_id = config["env_id"]
+    nb_iter = config["max_epoch"]
     nb_samp_per_iter = config["nb_samp_per_iter"]
     min_grad_steps_per_iter = config["min_grad_steps_per_iter"]
     nb_add_neurone_per_iter = config["nb_add_neurone_per_iter"]
@@ -66,7 +66,6 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         seed = config["seed"]
     else:
         seed = None
-
 
     device = "cpu"
     if torch.cuda.is_available():
@@ -111,7 +110,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         with torch.no_grad():
             if data:
-                data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']), cascade_qfunc, eta, squeeze_out=False)
+                data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']).to(device), cascade_qfunc, eta, squeeze_out=False)
 
         merge_data_(data, roll, max_replay_memory_size)
 
@@ -148,7 +147,12 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         # cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nb_add_neurone_per_iter + dim_s,
         #                              n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
-        cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=obs_feat.shape[1], n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
+        nbInputs = obs_feat.shape[1]
+        if "nb_inputs" in config.keys():
+            if config["nb_inputs"] >= dim_s:
+                nbInputs = config["nb_inputs"]
+
+        cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nbInputs, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
         # cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
         cascade_qfunc.to(device)
         # data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
@@ -238,7 +242,10 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         #"eta": tune.loguniform(0.1, 10),
         "eta": tune.grid_search([0.1]), # the smaller the better, best around 0.1, 0.5
         "gamma": tune.grid_search([0.99]),
-        "seed": tune.grid_search([1, 11, 17, 23, 100])
+        "seed": tune.grid_search([1, 11, 17, 23, 100]),
+        "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
+        "env_id" : tune.grid_search([ENV_ID]), 
+        "max_epoch": tune.grid_search([MAX_EPOCH])
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
@@ -295,5 +302,5 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
 
 
 if __name__ == '__main__':
-    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
-    run(default_config, save_model_dir='models')
+    main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
+    #run(default_config, save_model_dir='models')

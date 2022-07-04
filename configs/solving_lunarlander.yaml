@@ -1,0 +1,7 @@
+description: 'Lunar Lander by rlberry'
+seed: 23
+train_env: './configs/envs/lunarlander.yaml'
+eval_env: './configs/envs/lunarlander.yaml'
+agents:
+    - './configs/a2c/a2c_lunarlander.yaml' 
+    - './configs/dqn/dqn_lunarlander.yaml'

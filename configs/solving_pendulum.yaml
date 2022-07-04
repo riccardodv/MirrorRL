@@ -1,0 +1,7 @@
+description: 'Discrete Pendulum by rlberry'
+seed: 23
+train_env: './configs/envs/pendulum.yaml'
+eval_env: './configs/envs/pendulum.yaml'
+agents:
+    - './configs/a2c/a2c_pendulum.yaml' 
+    - './configs/dqn/dqn_pendulum.yaml'
