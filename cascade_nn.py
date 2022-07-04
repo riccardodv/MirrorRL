@@ -4,6 +4,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 import numpy as np
+from msc_tools import clone_lin_model
 
 
 class CascadeNeurone(nn.Module):
@@ -67,7 +68,7 @@ class CascadeNN(nn.Module):
                 features[:, nb_in:nb_in+nb_out] = casc(features[:, :nb_in], stack=False)
             return features
 
-    def add_n_neurones(self, all_features, nb_inputs, n_neurones=1, non_linearity=nn.ReLU()):
+    def add_n_neurones(self, all_features, nb_inputs, n_neurones=1, non_linearity=nn.ReLU(), init_from_old=False):
         assert nb_inputs >= self.dim_input, f'nb_inputs must at least be larger than data dimensionality {self.dim_input}'
         nb_inputs = min(nb_inputs, all_features.shape[1])
         new_neurone = CascadeNeurone(nb_inputs, nb_out=n_neurones, dim_data_input=self.dim_input, non_linearity=non_linearity)
@@ -77,9 +78,14 @@ class CascadeNN(nn.Module):
         self.cascade_neurone_list.append(new_neurone)
         self.nb_hidden += n_neurones
         self.cascade = nn.Sequential(*self.cascade_neurone_list)
+        if init_from_old:
+            old_out = clone_lin_model(self.output)
         self.output = nn.Linear(self.dim_input + self.nb_hidden, self.dim_output)
         self.output.weight.data[:] = 0.
         self.output.bias.data[:] = 0.
+        if init_from_old:
+            self.output.weight.data[:, :-n_neurones] = old_out.weight
+            self.output.bias.data[:] = old_out.bias
 
     def forward_from_old_cascade_features(self, feat):
         return self.output(self.get_features_from_old_cascade_features(feat))
@@ -90,6 +96,9 @@ class CascadeNN(nn.Module):
     def merge_with_old_weight_n_bias(self, old_weight, old_bias): #shouldn't mean be better, though the sum is probably coming from the paper
         self.output.weight.data[:, :old_weight.shape[1]] += old_weight
         self.output.bias.data += old_bias
+
+    def parameters_last_only(self):
+        return [*self.cascade_neurone_list[-1].parameters(), *self.output.parameters()]
 
 
 class CosDataset(TensorDataset):
