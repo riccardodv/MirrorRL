@@ -119,10 +119,12 @@ def test_reg_inc(nb_points):
     # train cascade neural network
     model = CascadeNN(dim_input=1, dim_output=1)
     loss = nn.MSELoss()
-    min_nsteps = 50000
+
+    min_nsteps = 100000
     nsteps = 0
     add_every_n_epoc = 200
-    nb_added_neurones = 2
+    nb_added_neurones = 20
+
     connect_last_k_features = 3 * nb_added_neurones
     dim_data_input = 1
     epoch = 0
@@ -151,18 +153,19 @@ def test_reg_inc(nb_points):
         
         for feat, residual in data_loader:
             optim.zero_grad()
-            loss(model.forward_from_old_cascade_features(feat), residual).backward()
+            l2_norm = sum(p.pow(2.0).sum() for p in [*model.cascade_neurone_list[-1].parameters(), *model.output.parameters()])
+            l = loss(model.forward_from_old_cascade_features(feat), residual) + 1e-3 * l2_norm
+            l.backward()
             optim.step()
             nsteps += 1
         epoch += 1
 
     model.merge_with_old_weight_n_bias(old_weight, old_bias)
 
-
     # Train feedforward network
     model2 = Feedforward(1,100)
     loss = nn.MSELoss()
-    min_nsteps = 50000
+    # min_nsteps = 50000
     nsteps = 0
     add_every_n_epoc = 200
     epoch = 0
