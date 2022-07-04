@@ -54,27 +54,23 @@ class Sampler:
         self.policy = None
         self.env = env
 
-    def _rollout(self, render=False, device = None):
+    def _rollout(self, render=False, device='cpu'):
         # Generates SARSA type transitions until episode's end
         obs = self.env.reset()
-        obs_tensor = torch.FloatTensor(obs)
-        if device:
-            obs_tensor = obs_tensor.to(device)
+        obs_tensor = torch.FloatTensor(obs, device=device)
         act = self.policy(obs_tensor)
         done = False
         while not done:
             if render:
                 self.env.render()
             nobs, rwd, done, terminal = self.env.step(act)
-            nobs_tensor = torch.FloatTensor(nobs)
-            if device:
-                nobs_tensor = nobs_tensor.to(device)
+            nobs_tensor = torch.FloatTensor(nobs, device=device)
             nact = self.policy(nobs_tensor)
             yield obs, act, rwd, done, terminal, nobs, nact
             obs = nobs
             act = nact
 
-    def rollouts(self, policy, min_trans, max_trans, render=False, device = None):
+    def rollouts(self, policy, min_trans, max_trans, render=False, device='cpu'):
         # Keep calling rollout and saving the resulting path until at least min_trans transitions are collected
         assert (min_trans <= max_trans)
         self.policy = policy
@@ -94,9 +90,9 @@ class Sampler:
                 self.curr_rollout = self._rollout(render, device)
 
         for key in set(keys):
-            paths[key] = np.asarray(paths[key])
+            paths[key] = torch.FloatTensor(np.asarray(paths[key]), device=device)
             if paths[key].ndim == 1:
-                paths[key] = np.expand_dims(paths[key], axis=-1)
+                paths[key] = paths[key].unsqueeze(1)
         return paths
 
 

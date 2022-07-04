@@ -15,9 +15,9 @@ from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
 # ENV_ID = "CartPole-v1"
-ENV_ID = "Acrobot-v1"
-# ENV_ID = "DiscretePendulum"
-MAX_EPOCH = 100
+# ENV_ID = "Acrobot-v1"
+ENV_ID = "DiscretePendulum"
+MAX_EPOCH = 15
 
 default_config = {
         "nb_samp_per_iter": 10000,
@@ -28,7 +28,9 @@ default_config = {
         "max_replay_memory_size": 10000,
         "eta": 0.1,
         "gamma": 0.99,
-        "seed": 0
+        "seed": 0,
+        "env_id": ENV_ID,
+        "max_epoch": MAX_EPOCH,
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
@@ -114,9 +116,9 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         merge_data_(data, roll, max_replay_memory_size)
 
-        obs, act, rwd, nobs, nact, not_terminal = torch.FloatTensor(data['obs']), torch.LongTensor(data['act']), \
-            torch.FloatTensor(data['rwd']), torch.FloatTensor(data['nobs']), torch.LongTensor(data['nact']),\
-            1 - torch.FloatTensor(data['terminal'])
+        obs, act, rwd, nobs, nact, not_terminal = data['obs'], data['act'].long(), \
+            data['rwd'], data['nobs'], data['nact'].long(),\
+            1 - data['terminal'].float()
 
         obs = obs.to(device)
         act = act.to(device)
@@ -302,5 +304,5 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
 
 
 if __name__ == '__main__':
-    main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
-    #run(default_config, save_model_dir='models')
+    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
+    run(default_config, save_model_dir='models')
