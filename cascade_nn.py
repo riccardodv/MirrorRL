@@ -1,10 +1,10 @@
-from cProfile import label
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 import numpy as np
 from msc_tools import clone_lin_model
+import pickle
 
 
 class CascadeNeurone(nn.Module):
@@ -120,7 +120,7 @@ def test_reg_inc(nb_points):
     model = CascadeNN(dim_input=1, dim_output=1)
     loss = nn.MSELoss()
 
-    min_nsteps = 100000
+    min_nsteps = 110000 #100000
     nsteps = 0
     add_every_n_epoc = 200
     nb_added_neurones = 20
@@ -129,6 +129,7 @@ def test_reg_inc(nb_points):
     dim_data_input = 1
     epoch = 0
     old_weight, old_bias = None, None
+    weights = []
     while nsteps < min_nsteps:
         if epoch % add_every_n_epoc == 0:
             # Merging old model with new if any
@@ -159,6 +160,12 @@ def test_reg_inc(nb_points):
             optim.step()
             nsteps += 1
         epoch += 1
+        weights.append(model.output.weight.data)
+    
+    with open("weights_cos.pkl", "wb") as f:
+        pickle.dump(weights, f)
+
+    
 
     model.merge_with_old_weight_n_bias(old_weight, old_bias)
 
@@ -189,6 +196,7 @@ def test_reg_inc(nb_points):
             optim.step()
             nsteps += 1
         epoch += 1
+
 
     # plot results
     plt.figure()
