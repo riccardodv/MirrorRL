@@ -20,14 +20,14 @@ def lstd_q(phis, act, r, phisp, nact, not_terminal, gamma, nb_act, add_bias=True
 
     diff = phisa - gamma * phispa * not_terminal
     print('computing a')
-    a = torch.einsum('ij,ik->jk', phisa, diff)
+    a = phisa.t() @ diff
     print('computing b')
-    b = (phisa * r).sum(0)
+    b = phisa.t() @ r
     print('calling linalg solve')
     sol = torch.linalg.lstsq(a, b, driver='gelsd')[0]
     print(f'finished. Solution norm2 {sol.pow(2).sum().sqrt()} normInf {sol.abs().max()}')
     sol = sol.view(nb_act, nfeat)
     if add_bias:
-        return sol[:, 0], sol[:, 1:]
+        return sol[:, 0], sol[:, 1:], phisa
     else:
-        return sol
+        return sol, phisa
