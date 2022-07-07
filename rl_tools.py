@@ -9,7 +9,7 @@ def merge_data_(d1, d2, max_len):
             d1[key] = d2[key]
     else:
         for key in d1.keys():
-            d1[key] = np.append(d1[key], d2[key], axis=0)
+            d1[key] = torch.vstack([d1[key], d2[key]])
             d1[key] = d1[key][-max_len:]
 
 
@@ -112,7 +112,7 @@ def softmax_policy(obs, qfunc, eta, squeeze_out=True):
         if squeeze_out:
             return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().squeeze(0).cpu().numpy()
         else:
-            return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().unsqueeze(1).cpu().numpy()
+            return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().unsqueeze(1)
 
 
 def get_targets_qvals(q_values_next, rwd, done, discount, lam):

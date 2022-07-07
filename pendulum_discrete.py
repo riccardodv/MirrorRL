@@ -4,9 +4,12 @@ import warnings
 
 
 class PendulumDiscrete:
-    def __init__(self):
+    def __init__(self, horizon=None):
         self.env = gym.make('Pendulum-v1')
-        self.horizon = self.env._max_episode_steps
+        if horizon is None:
+            self.horizon = self.env._max_episode_steps
+        else:
+            self.horizon = horizon
         self.env._max_episode_steps = np.inf
         self.done_steps = 0
         self.act_mapping = np.asarray([[-2], [0], [2]])

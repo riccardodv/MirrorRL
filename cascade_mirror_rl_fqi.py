@@ -16,7 +16,7 @@ from ray.tune.schedulers import ASHAScheduler
 # ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
 ENV_ID = "DiscretePendulum"
-MAX_EPOCH = 15
+MAX_EPOCH = 150
 
 default_config = {
         "env_id": ENV_ID,
