@@ -28,6 +28,6 @@ def lstd_q(phis, act, r, phisp, nact, not_terminal, gamma, nb_act, add_bias=True
     print(f'finished. Solution norm2 {sol.pow(2).sum().sqrt()} normInf {sol.abs().max()}')
     sol = sol.view(nb_act, nfeat)
     if add_bias:
-        return sol[:, 0], sol[:, 1:], phisa
+        return sol[:, 0], sol[:, 1:]
     else:
-        return sol, phisa
+        return sol

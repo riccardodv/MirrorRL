@@ -138,7 +138,7 @@ for it in range(nb_iter):
     if learn_mode == 'lstd':
         phis = qfunc.get_features(obs)
         nphis = qfunc.get_features(nobs)
-        bias, weight, phisa = lstd_q(phis, act, rwd, nphis, nact, 1 - ter, gamma, env.get_nb_act(), add_bias=True)
+        bias, weight = lstd_q(phis, act, rwd, nphis, nact, 1 - ter, gamma, env.get_nb_act(), add_bias=True)
         qfunc.output.bias.data, qfunc.output.weight.data = bias, weight
 
         # logging
