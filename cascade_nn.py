@@ -100,6 +100,9 @@ class CascadeNN(nn.Module):
     def parameters_last_only(self):
         return [*self.cascade_neurone_list[-1].parameters(), *self.output.parameters()]
 
+    def feat_last_only(self):
+        return [*self.cascade_neurone_list[-1].parameters()]
+
 
 class CosDataset(TensorDataset):
     def __init__(self, nb_points):

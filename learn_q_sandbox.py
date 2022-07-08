@@ -1,3 +1,4 @@
+from re import S
 import numpy as np
 import torch
 from rl_tools import Sampler, EnvWithTerminal
@@ -96,7 +97,7 @@ else:
     true_q = compute_mc_returns(rolls_learn, gamma)
 
 non_linearity = torch.nn.Tanh()
-learn_mode = ['fqi', 'lstd', 'mc', 'mc_mlp'][-4]
+learn_mode = ['fqi', 'lstd', 'mc', 'mc_mlp'][1]
 # rolls_test = env_sampler.rollouts(policy=lambda x: deterministic_policy(x, pol),
 #                              min_trans=nb_samp, max_trans=nb_samp, device=device)
 returns = rwds_finished_rollouts(rolls_learn)
@@ -126,6 +127,17 @@ loss_fct = torch.nn.MSELoss()
 msbes_train = []
 mse_train = []
 for it in range(nb_iter):
+    if learn_mode == "lstd":
+        with torch.no_grad():
+            old_phis = qfunc.get_features(obs)
+            old_nphis = qfunc.get_features(nobs)
+
+            old_qtarg = rwd + gamma * (1 - ter) * qfunc.output(old_nphis).gather(dim=1, index=nact)
+            old_qvals = qfunc.output(old_phis).gather(dim=1, index=act)
+            e_so = old_qvals - old_qtarg
+            e_o = e_so.mean(dim=0)
+
+
     if not learn_mode == 'mc_mlp':
         # computing Q target
         with torch.no_grad():
@@ -133,11 +145,29 @@ for it in range(nb_iter):
             nobs_features = qfunc.get_features(nobs)
         qfunc.add_n_neurones(obs_features, torch.inf, neurone_per_iter, non_linearity=non_linearity, init_from_old=True)
 
+
     if learn_mode == 'mc':
         optim = torch.optim.Adam(qfunc.parameters_last_only(), lr=lr)
     if learn_mode == 'lstd':
+        optim = torch.optim.Adam(qfunc.feat_last_only(), lr=lr)
+
+        for i in range(10): # to change later!!!!!!!!!!
+            # nphis = qfunc.get_features(nobs)
+
+            # qtarg = rwd + gamma * (1 - ter) * qfunc.output(nphis).gather(dim=1, index=nact)
+            # qvals = qfunc.output(phis).gather(dim=1, index=act)
+            # e_so = qvals - qtarg
+            # e_o = e_so.mean(dim=0)
+            v_s = qfunc.get_features(obs)
+            v = v_s.mean(dim=0)
+            corr = -((v_s - v)*(e_so- e_o)).sum(dim=0).abs().sum()
+            corr.backward()
+            optim.step()
+            optim.zero_grad()
+
         phis = qfunc.get_features(obs)
         nphis = qfunc.get_features(nobs)
+
         bias, weight = lstd_q(phis, act, rwd, nphis, nact, 1 - ter, gamma, env.get_nb_act(), add_bias=True)
         qfunc.output.bias.data, qfunc.output.weight.data = bias, weight
 
