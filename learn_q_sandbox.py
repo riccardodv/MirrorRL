@@ -122,24 +122,23 @@ if learn_mode == 'mc_mlp':
 else:
     qfunc = CascadeNN(env.get_dim_obs(), env.get_nb_act())
 
-epoch_per_iter = 30
+epoch_per_iter = 10
 loss_fct = torch.nn.MSELoss()
 msbes_train = []
 mse_train = []
 for it in range(nb_iter):
     if learn_mode == "lstd":
+        # computing Q target and bellman errors
         with torch.no_grad():
             old_phis = qfunc.get_features(obs)
             old_nphis = qfunc.get_features(nobs)
-
             old_qtarg = rwd + gamma * (1 - ter) * qfunc.output(old_nphis).gather(dim=1, index=nact)
             old_qvals = qfunc.output(old_phis).gather(dim=1, index=act)
             e_so = old_qvals - old_qtarg
-            e_o = e_so.mean(dim=0)
+            e_o = e_so.mean(dim=0).repeat(len(e_so), 1)
 
 
     if not learn_mode == 'mc_mlp':
-        # computing Q target
         with torch.no_grad():
             obs_features = qfunc.get_features(obs)
             nobs_features = qfunc.get_features(nobs)
@@ -149,21 +148,31 @@ for it in range(nb_iter):
     if learn_mode == 'mc':
         optim = torch.optim.Adam(qfunc.parameters_last_only(), lr=lr)
     if learn_mode == 'lstd':
+        # initialize optimizer just for linear output layer
         optim = torch.optim.Adam(qfunc.feat_last_only(), lr=lr)
+        # compute features when adding new neurones
+  
 
-        for i in range(10): # to change later!!!!!!!!!!
-            # nphis = qfunc.get_features(nobs)
 
-            # qtarg = rwd + gamma * (1 - ter) * qfunc.output(nphis).gather(dim=1, index=nact)
-            # qvals = qfunc.output(phis).gather(dim=1, index=act)
-            # e_so = qvals - qtarg
-            # e_o = e_so.mean(dim=0)
-            v_s = qfunc.get_features(obs)
-            v = v_s.mean(dim=0)
-            corr = -((v_s - v)*(e_so- e_o)).sum(dim=0).abs().sum()
-            corr.backward()
-            optim.step()
-            optim.zero_grad()
+        # for i in range(10): 
+        #     v_s = qfunc.get_features(obs)
+        #     v = v_s.mean(dim=0)
+        #     corr = -((v_s - v)*(e_so- e_o)).sum(dim=0).abs().sum()
+        #     corr.backward()
+        #     optim.step()
+        #     optim.zero_grad()
+        
+        data_loader = DataLoader(TensorDataset(obs, e_so, e_o), batch_size=batch_size, shuffle=True, drop_last=True)
+
+        for e in range(epoch_per_iter):
+            for _obs, _e_so, _e_o in data_loader:
+                _v_s = qfunc.get_features(_obs) # TODO check that this is the right thing to do, shouldnt it be just features from last neurons added?
+                _v = _v_s.mean(dim=0)
+                corr = -((_v_s - _v)*(_e_so - _e_o)).sum(dim=0).abs().sum()
+                corr.backward()
+                optim.step()
+                optim.zero_grad()
+
 
         phis = qfunc.get_features(obs)
         nphis = qfunc.get_features(nobs)
