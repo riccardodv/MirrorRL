@@ -97,7 +97,7 @@ else:
     true_q = compute_mc_returns(rolls_learn, gamma)
 
 non_linearity = torch.nn.Tanh()
-learn_mode = ['fqi', 'lstd', 'mc', 'mc_mlp'][1]
+learn_mode = ['fqi', 'lstd', 'mc', 'mc_mlp', "lstd_random"][1]
 # rolls_test = env_sampler.rollouts(policy=lambda x: deterministic_policy(x, pol),
 #                              min_trans=nb_samp, max_trans=nb_samp, device=device)
 returns = rwds_finished_rollouts(rolls_learn)
@@ -149,9 +149,10 @@ for it in range(nb_iter):
     if learn_mode == 'mc':
         optim = torch.optim.Adam(qfunc.parameters_last_only(), lr=lr)
     if learn_mode == 'lstd':
-        optim = torch.optim.Adam(qfunc.feat_last_only(), lr=lr)
+        optim = torch.optim.SGD(qfunc.feat_last_only(), lr=lr * 0.1)
+        sched = torch.optim.lr_scheduler.StepLR(optim, step_size=1, gamma=0.99)
 
-        for i in range(10): # to change later!!!!!!!!!!
+        for i in range(100): # to change later!!!!!!!!!!
             # nphis = qfunc.get_features(nobs)
 
             # qtarg = rwd + gamma * (1 - ter) * qfunc.output(nphis).gather(dim=1, index=nact)
@@ -164,7 +165,22 @@ for it in range(nb_iter):
             corr.backward()
             optim.step()
             optim.zero_grad()
+            sched.step()
 
+        phis = qfunc.get_features(obs)
+        nphis = qfunc.get_features(nobs)
+
+        bias, weight = lstd_q(phis, act, rwd, nphis, nact, 1 - ter, gamma, env.get_nb_act(), add_bias=True)
+        qfunc.output.bias.data, qfunc.output.weight.data = bias, weight
+
+        # logging
+        qtarg = rwd + gamma * (1 - ter) * qfunc.output(nphis).gather(dim=1, index=nact)
+        qvals = qfunc.output(phis).gather(dim=1, index=act)
+        msbes_train.append(loss_fct(qvals, qtarg).item())
+        mse_train.append(loss_fct(qvals, true_q).item())
+        print(f'iter {it}: msbe {msbes_train[-1]:5.3f}, mse to q* {mse_train[-1]:5.3f}')
+
+    if learn_mode == 'lstd_random':
         phis = qfunc.get_features(obs)
         nphis = qfunc.get_features(nobs)
 
