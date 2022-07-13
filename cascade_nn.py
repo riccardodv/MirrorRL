@@ -90,8 +90,8 @@ class CascadeNN(nn.Module):
     def forward_from_old_cascade_features(self, feat):
         return self.output(self.get_features_from_old_cascade_features(feat))
 
-    def get_features_from_old_cascade_features(self, feat):
-        return self.cascade_neurone_list[-1](feat)
+    def get_features_from_old_cascade_features(self, feat, stack=True):
+        return self.cascade_neurone_list[-1](feat, stack=stack)
 
     def merge_with_old_weight_n_bias(self, old_weight, old_bias): #shouldn't mean be better, though the sum is probably coming from the paper
         self.output.weight.data[:, :old_weight.shape[1]] += old_weight

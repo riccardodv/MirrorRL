@@ -136,6 +136,7 @@ for it in range(nb_iter):
             old_qvals = qfunc.output(old_phis).gather(dim=1, index=act)
             e_so = old_qvals - old_qtarg
             e_o = e_so.mean(dim=0)
+            e_o_std = e_so.std(dim=0)
 
 
     if not learn_mode == 'mc_mlp':
@@ -152,21 +153,25 @@ for it in range(nb_iter):
         optim = torch.optim.SGD(qfunc.feat_last_only(), lr=lr * 0.1)
         sched = torch.optim.lr_scheduler.StepLR(optim, step_size=1, gamma=0.99)
 
-        for i in range(100): # to change later!!!!!!!!!!
-            # nphis = qfunc.get_features(nobs)
+        for i in range(100): 
 
-            # qtarg = rwd + gamma * (1 - ter) * qfunc.output(nphis).gather(dim=1, index=nact)
-            # qvals = qfunc.output(phis).gather(dim=1, index=act)
-            # e_so = qvals - qtarg
-            # e_o = e_so.mean(dim=0)
-            v_s = qfunc.get_features(obs)
+            # v_s = qfunc.get_features(obs)
+
+            feat = qfunc.get_features(obs)
+            v_s = qfunc.get_features_from_old_cascade_features( feat, stack=False)
+
             v = v_s.mean(dim=0)
-            corr = -((v_s - v)*(e_so- e_o)).sum(dim=0).abs().sum()
+            v_std =  v_s.std(dim=0)
+            corr = -((v_s - v)*(e_so- e_o)/(v_std*e_o_std*v_s.shape[0])).sum(dim=0).abs().sum()
+            if (i+1)%10 == 0:
+                print("corr=", corr, "cov", ((v_s - v)*(e_so- e_o)).sum(dim=0).abs().sum())
             corr.backward()
             optim.step()
             optim.zero_grad()
             sched.step()
 
+
+        
         phis = qfunc.get_features(obs)
         nphis = qfunc.get_features(nobs)
 
