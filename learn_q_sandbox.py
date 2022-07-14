@@ -97,7 +97,7 @@ else:
     true_q = compute_mc_returns(rolls_learn, gamma)
 
 non_linearity = torch.nn.Tanh()
-learn_mode = ['fqi', 'lstd', 'mc', 'mc_mlp', "lstd_random"][1]
+learn_mode = ['fqi', 'lstd', 'mc', 'mc_mlp', "lstd_random"][0]
 # rolls_test = env_sampler.rollouts(policy=lambda x: deterministic_policy(x, pol),
 #                              min_trans=nb_samp, max_trans=nb_samp, device=device)
 returns = rwds_finished_rollouts(rolls_learn)
@@ -205,9 +205,9 @@ for it in range(nb_iter):
                 qtarg = rolls_learn['rwd'] + gamma * (1 - ter) * qfunc.forward_from_old_cascade_features(nobs_features).gather(dim=1, index=nact)
                 # logging
                 qvals = qfunc.forward_from_old_cascade_features(obs_features).gather(dim=1, index=act)
-                msbes_train.append(loss_fct(qvals, qtarg).item())
-                mse_train.append(loss_fct(qvals, true_q).item())
-                print(f'iter {it}, epoch {e}: msbe {msbes_train[-1]:5.3f}, mse to q* {mse_train[-1]:5.3f}')
+                # msbes_train.append(loss_fct(qvals, qtarg).item())
+                # mse_train.append(loss_fct(qvals, true_q).item())
+                # print(f'iter {it}, epoch {e}: msbe {msbes_train[-1]:5.3f}, mse to q* {mse_train[-1]:5.3f}')
 
             data_loader = DataLoader(TensorDataset(obs_features, act, qtarg), batch_size=batch_size, shuffle=True, drop_last=True)
             optim = torch.optim.Adam(qfunc.parameters_last_only(), lr=lr)
@@ -216,6 +216,17 @@ for it in range(nb_iter):
                 q = qfunc.forward_from_old_cascade_features(o).gather(dim=1, index=a)
                 loss_fct(q, qt).backward()
                 optim.step()
+        
+        # logging
+        with torch.no_grad():
+            phis = qfunc.get_features(obs)
+            nphis = qfunc.get_features(nobs)
+            qtarg = rwd + gamma * (1 - ter) * qfunc.output(nphis).gather(dim=1, index=nact)
+            qvals = qfunc.output(phis).gather(dim=1, index=act)
+            msbes_train.append(loss_fct(qvals, qtarg).item())
+            mse_train.append(loss_fct(qvals, true_q).item())
+            print(f'iter {it}: msbe {msbes_train[-1]:5.3f}, mse to q* {mse_train[-1]:5.3f}')
+
     elif learn_mode == 'mc':
         for e in range(epoch_per_iter):
             with torch.no_grad():
