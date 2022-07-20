@@ -69,7 +69,7 @@ elif env_name == 'acrobot':
 
 env.seed(0)
 neurone_per_iter = 10
-nb_iter = 10
+nb_iter = 100
 print('nb params cascade at end of training:', nb_params_cascade(env.get_dim_obs(), nb_iter, neurone_per_iter, env.get_nb_act()))
 print('nb params cascade v2 at end of training:', nb_params_cascade_v2(env.get_dim_obs(), nb_iter, neurone_per_iter, env.get_nb_act()))
 
@@ -264,7 +264,7 @@ for it in range(nb_iter):
             qvals = qfunc.output(phis).gather(dim=1, index=test_act)
             msbes_test.append(loss_fct(qvals, qtarg).item())
             mse_test.append(loss_fct(qvals, true_q_test).item())
-            print(f'TEST: \t iter {it}: msbe {msbes_train[-1]:5.3f}, mse to q* {mse_train[-1]:5.3f}')
+            print(f'TEST: \t iter {it}: msbe {msbes_test[-1]:5.3f}, mse to q* {mse_test[-1]:5.3f}')
 
     elif learn_mode == 'mc':
         for e in range(epoch_per_iter):
