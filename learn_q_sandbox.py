@@ -69,7 +69,7 @@ elif env_name == 'acrobot':
 
 env.seed(0)
 neurone_per_iter = 10
-nb_iter = 100
+nb_iter = 10
 print('nb params cascade at end of training:', nb_params_cascade(env.get_dim_obs(), nb_iter, neurone_per_iter, env.get_nb_act()))
 print('nb params cascade v2 at end of training:', nb_params_cascade_v2(env.get_dim_obs(), nb_iter, neurone_per_iter, env.get_nb_act()))
 
@@ -100,6 +100,24 @@ non_linearity = torch.nn.Tanh()
 learn_mode = ['fqi', 'lstd', 'mc', 'mc_mlp', "lstd_random"][0]
 # rolls_test = env_sampler.rollouts(policy=lambda x: deterministic_policy(x, pol),
 #                              min_trans=nb_samp, max_trans=nb_samp, device=device)
+
+idx = torch.arange(len(rolls_learn["obs"]))
+train_idx, test_idx = torch.utils.data.random_split(idx, [len(idx) - int(len(idx) * 0.1), int(len(idx) * 0.1)])
+
+
+rolls_learn_test = dict()
+for k in rolls_learn.keys():
+    rolls_learn_test[k] = rolls_learn[k][test_idx]
+
+
+for k in rolls_learn.keys():
+    rolls_learn[k] = rolls_learn[k][train_idx]
+
+true_q_test = true_q[test_idx]
+true_q = true_q[train_idx]
+
+
+
 returns = rwds_finished_rollouts(rolls_learn)
 print(returns, len(rolls_learn['rwd']))
 # plt.plot(returns, 'x')
@@ -126,6 +144,10 @@ epoch_per_iter = 30
 loss_fct = torch.nn.MSELoss()
 msbes_train = []
 mse_train = []
+
+msbes_test = []
+mse_test = []
+
 for it in range(nb_iter):
     if learn_mode == "lstd":
         with torch.no_grad():
@@ -150,8 +172,8 @@ for it in range(nb_iter):
     if learn_mode == 'mc':
         optim = torch.optim.Adam(qfunc.parameters_last_only(), lr=lr)
     if learn_mode == 'lstd':
-        optim = torch.optim.SGD(qfunc.feat_last_only(), lr=lr * 0.1)
-        sched = torch.optim.lr_scheduler.StepLR(optim, step_size=1, gamma=0.99)
+        optim = torch.optim.Adam(qfunc.feat_last_only(), lr=lr)
+        # sched = torch.optim.lr_scheduler.StepLR(optim, step_size=1, gamma=0.99)
 
         for i in range(100): 
 
@@ -168,7 +190,7 @@ for it in range(nb_iter):
             corr.backward()
             optim.step()
             optim.zero_grad()
-            sched.step()
+            # sched.step()
 
 
         
@@ -227,6 +249,23 @@ for it in range(nb_iter):
             mse_train.append(loss_fct(qvals, true_q).item())
             print(f'iter {it}: msbe {msbes_train[-1]:5.3f}, mse to q* {mse_train[-1]:5.3f}')
 
+        #testing
+        with torch.no_grad():
+            test_obs = rolls_learn_test["obs"]
+            test_act = rolls_learn_test["act"].long()
+            test_nobs = rolls_learn_test["nobs"]
+            test_nact = rolls_learn_test["nact"].long()
+            test_rwd = rolls_learn_test["rwd"]
+            test_ter = rolls_learn_test["terminal"]
+
+            phis = qfunc.get_features(test_obs)
+            nphis = qfunc.get_features(test_nobs)
+            qtarg = test_rwd + gamma * (1 - test_ter) * qfunc.output(nphis).gather(dim=1, index=test_nact)
+            qvals = qfunc.output(phis).gather(dim=1, index=test_act)
+            msbes_test.append(loss_fct(qvals, qtarg).item())
+            mse_test.append(loss_fct(qvals, true_q_test).item())
+            print(f'TEST: \t iter {it}: msbe {msbes_train[-1]:5.3f}, mse to q* {mse_train[-1]:5.3f}')
+
     elif learn_mode == 'mc':
         for e in range(epoch_per_iter):
             with torch.no_grad():
@@ -269,4 +308,8 @@ plt.semilogy(mse_train)
 plt.legend(['MSBE', 'MSE to true Q'])
 plt.show()
 msbes_train = np.asarray(msbes_train)
+
+
 np.save(f'errors_{env_name}_{learn_mode}.npy', {'msbe': msbes_train, 'mse': mse_train})
+
+np.save(f"test_errors_{env_name}_{learn_mode}.npy", {'msbe': msbes_test, 'mse': mse_test})
