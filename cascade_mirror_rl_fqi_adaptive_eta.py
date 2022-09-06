@@ -15,7 +15,8 @@ from ray.tune.schedulers import ASHAScheduler
 
 # ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
-ENV_ID = "DiscretePendulum"
+# ENV_ID = "DiscretePendulum"
+ENV_ID = "LunarLander-v2"
 MAX_EPOCH = 150
 
 default_config = {
@@ -27,7 +28,7 @@ default_config = {
         "batch_size": 64,
         "lr_model": 1e-3,
         "max_replay_memory_size": 10000,
-        "eta": 0.1,
+        "eta": .5,
         "gamma": 0.99,
         "seed": 0,
         "env_id": ENV_ID,
@@ -65,6 +66,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     eta = config["eta"]
     gamma = config["gamma"]
     lam = 0.
+    max_kl = .015
     if "seed" in config.keys():
         seed = config["seed"]
     else:
@@ -107,13 +109,13 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     for iter in range(nb_iter):
 
         roll = env_sampler.rollouts(lambda x: softmax_policy(
-            x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
+            x, cascade_qfunc, eta=1.), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(
             roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
 
         with torch.no_grad():
             if data:
-                data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']).to(device), cascade_qfunc, eta, squeeze_out=False)
+                data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']).to(device), cascade_qfunc, eta=1., squeeze_out=False)
 
         merge_data_(data, roll, max_replay_memory_size)
 
@@ -141,9 +143,9 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
             nobs_q = nobs_q_all.gather(dim=1, index=nact)
             obs_old_distrib = torch.distributions.Categorical(
-                logits=eta * cascade_qfunc(obs))
+                logits=cascade_qfunc(obs))
             nobs_old_distrib = torch.distributions.Categorical(
-                logits=eta * cascade_qfunc(nobs))
+                logits=cascade_qfunc(nobs))
             nobs_v = (nobs_q_all * nobs_old_distrib.probs).sum(1, keepdim=True)
             old_out = clone_lin_model(cascade_qfunc.output)
             # q_target = rwd + gamma * nobs_q * not_terminal
@@ -190,10 +192,42 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             print(
                 f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
 
-        cascade_qfunc.merge_q(old_out)
+        cascade_qfunc.merge_with_old_weight_n_bias(cascade_qfunc.qfunc.weight, cascade_qfunc.qfunc.bias)
+        cascade_qfunc.qfunc = clone_lin_model(cascade_qfunc.output)
+
+        def mix_with_eta(e):
+            cascade_qfunc.output.weight.data = cascade_qfunc.qfunc.weight * e
+            cascade_qfunc.output.bias.data = cascade_qfunc.qfunc.bias * e
+            cascade_qfunc.output.weight.data[:, :old_out.weight.shape[1]] += old_out.weight
+            cascade_qfunc.output.bias.data += old_out.bias
+
+        def linesearch_eta(max_search):
+            curr_eta = eta
+            best_eta = 0.
+            lw = 0.
+            up = eta
+            mix_with_eta(curr_eta)
+            new_distrib = torch.distributions.Categorical(logits=cascade_qfunc(obs))
+            kl = stable_kl_div(obs_old_distrib.probs, new_distrib.probs).mean().item()
+            if kl < max_kl:
+                return curr_eta
+            for k_ls in range(max_search):
+                curr_eta = (up + lw) / 2.
+                mix_with_eta(curr_eta)
+                new_distrib = torch.distributions.Categorical(logits=cascade_qfunc(obs))
+                kl = stable_kl_div(obs_old_distrib.probs, new_distrib.probs).mean().item()
+                if kl > max_kl:
+                    up = curr_eta
+                else:
+                    lw = curr_eta
+                    best_eta = curr_eta
+            return best_eta
+
+        eta_t = linesearch_eta(max_search=20)
+        mix_with_eta(eta_t)
         with torch.no_grad():
             new_distrib = torch.distributions.Categorical(
-                logits=eta * cascade_qfunc(obs))
+                logits=cascade_qfunc(obs))
             # kl = torch.distributions.kl_divergence(obs_old_distrib, new_distrib).mean().item()
             kl = stable_kl_div(obs_old_distrib.probs,
                                new_distrib.probs).mean().item()
@@ -203,7 +237,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             #     print("new_distrib", new_distrib.probs)
             normalized_entropy = new_distrib.entropy().mean().item() / np.log(nb_act)
             print(
-                f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}\n')
+                f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} eta_t {eta_t} kl {kl} entropy (in (0, 1)) {normalized_entropy}\n')
         with tune.checkpoint_dir(iter) as checkpoint_dir:
             path = os.path.join(checkpoint_dir, "checkpoint")
             torch.save((cascade_qfunc.state_dict(), cascade_qfunc.state_dict()), path)
