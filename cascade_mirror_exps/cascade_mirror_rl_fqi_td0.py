@@ -2,9 +2,9 @@ import gym
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
-from cascade_mirror_rl_brm import CascadeQ
-from msc_tools import clone_lin_model, norm_squared_lin, stable_kl_div
+from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
+from cascade.nn import CascadeQ
+from cascade.utils import clone_lin_model, norm_squared_lin, stable_kl_div
 
 
 def main():

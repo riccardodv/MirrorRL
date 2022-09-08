@@ -2,13 +2,13 @@ import gym
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
-from cascade_mirror_rl_brm import CascadeQ
-from msc_tools import clone_lin_model, stable_kl_div
-import itertools
+
+from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
+from cascade.nn import CascadeQ
+from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
-from pendulum_discrete import PendulumDiscrete
+from cascade.discrete_envs import PendulumDiscrete
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler

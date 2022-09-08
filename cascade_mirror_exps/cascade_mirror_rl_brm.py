@@ -3,25 +3,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-from cascade_nn import CascadeNN
-from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
-from msc_tools import clone_lin_model
 
 
-class CascadeQ(CascadeNN):
-    def __init__(self, dim_input, dim_output):
-        super().__init__(dim_input, dim_output)
-        self.qfunc = clone_lin_model(self.output)
+from cascade.nn import CascadeNN, CascadeQ
+from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, clone_lin_model
 
-    def get_q(self, obs, stack=True):
-        return self.qfunc(self.get_features(obs, stack))
-
-    def merge_q(self, old_output_model):
-        self.merge_with_old_weight_n_bias(self.qfunc.weight, self.qfunc.bias)
-        self.qfunc = clone_lin_model(self.output)
-
-        self.output.weight.data[:, :old_output_model.weight.shape[1]] += old_output_model.weight
-        self.output.bias.data += old_output_model.bias
 
 
 def main():
@@ -39,7 +25,7 @@ def main():
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
     cascade_qfunc = CascadeQ(dim_s, nb_act)
-    nb_iter = 200
+    nb_iter = 1
     nb_samp_per_iter = 10000
     min_grad_steps_per_iter = 10000
     nb_add_neurone_per_iter = 10

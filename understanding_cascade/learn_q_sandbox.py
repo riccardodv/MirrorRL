@@ -1,13 +1,12 @@
-from re import S
 import numpy as np
 import torch
-from rl_tools import Sampler, EnvWithTerminal
+from cascade.utils import Sampler, EnvWithTerminal
 import gym
-from pendulum_discrete import PendulumDiscrete
+from cascade.discrete_envs import PendulumDiscrete
 import matplotlib.pyplot as plt
-from cascade_nn import CascadeNN
+from cascade.nn import CascadeNN
 from torch.utils.data import DataLoader, TensorDataset
-from lstdq_torch import lstd_q
+from cascade.utils import lstd_q
 
 
 def rwds_finished_rollouts(samples):
@@ -143,6 +142,7 @@ else:
 epoch_per_iter = 30
 loss_fct = torch.nn.MSELoss()
 msbes_train = []
+msbes_during_train = []
 mse_train = []
 
 msbes_test = []
@@ -236,8 +236,10 @@ for it in range(nb_iter):
             for o, a, qt in data_loader:
                 optim.zero_grad()
                 q = qfunc.forward_from_old_cascade_features(o).gather(dim=1, index=a)
-                loss_fct(q, qt).backward()
+                loss_fqi = loss_fct(q, qt)
+                loss_fqi.backward()
                 optim.step()
+            msbes_during_train.append(loss_fqi.item())
         
         # logging
         with torch.no_grad():
@@ -310,6 +312,8 @@ plt.show()
 msbes_train = np.asarray(msbes_train)
 
 
+
 np.save(f'errors_{env_name}_{learn_mode}.npy', {'msbe': msbes_train, 'mse': mse_train})
+np.save(f"during_train_{env_name}_{learn_mode}.npy", {'msbe': msbes_during_train})
 
 np.save(f"test_errors_{env_name}_{learn_mode}.npy", {'msbe': msbes_test, 'mse': mse_test})

@@ -2,12 +2,12 @@ import gym
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
-from cascade_mirror_rl_brm import CascadeQ
-from msc_tools import clone_lin_model, stable_kl_div
-from bipedal_discrete import BipedalWalkerDiscrete
-from pendulum_discrete import PendulumDiscrete
-from lstdq_torch import lstd_q
+from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
+from cascade.nn import CascadeQ
+from cascade.utils import clone_lin_model, stable_kl_div
+# from bipedal_discrete import BipedalWalkerDiscrete
+from cascade.discrete_envs import PendulumDiscrete
+from cascade.utils import lstd_q
 import time
 
 
@@ -25,7 +25,7 @@ def main():
     else:
         env = EnvWithTerminal(gym.make(env_id))
     env_sampler = Sampler(env)
-    nb_iter = 100
+    nb_iter = 1
     gamma = .99
     nb_samp_per_iter = 10000
     max_replay_memory_size = nb_samp_per_iter

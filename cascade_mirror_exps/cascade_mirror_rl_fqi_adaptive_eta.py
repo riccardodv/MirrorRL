@@ -2,13 +2,15 @@ import gym
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from rl_tools import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
-from cascade_mirror_rl_brm import CascadeQ
-from msc_tools import clone_lin_model, stable_kl_div
-import itertools
+
+from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals, clone_lin_model, stable_kl_div
+from cascade.nn import CascadeQ
+
+
+
 import os
 import pandas as pd
-from pendulum_discrete import PendulumDiscrete
+from cascade.discrete_envs import PendulumDiscrete
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
@@ -17,7 +19,7 @@ from ray.tune.schedulers import ASHAScheduler
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 ENV_ID = "LunarLander-v2"
-MAX_EPOCH = 150
+MAX_EPOCH = 1
 
 default_config = {
         "env_id": ENV_ID,
