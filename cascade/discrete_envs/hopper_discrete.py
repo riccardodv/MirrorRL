@@ -1,7 +1,8 @@
 import gym
 import numpy as np
 import warnings
-
+from gym import spaces
+import itertools
 
 class HopperDiscrete:
     def __init__(self, horizon=None):
@@ -12,7 +13,13 @@ class HopperDiscrete:
             self.horizon = horizon
         self.env._max_episode_steps = np.inf
         self.done_steps = 0
-        self.act_mapping = np.asarray([[-1, 0, 0], [1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [0, 0, 0]])
+        self.observation_space = self.env.observation_space
+        # self.act_mapping = np.asarray([[-1, 0, 0], [1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [0, 0, 0]])
+        # self.action_space = spaces.Discrete(7)
+
+        l = np.linspace(-1.0, 1.0, num=3)
+        self.act_mapping = np.asarray([x for x in itertools.product(l, l, l)])
+        self.action_space = spaces.Discrete(self.act_mapping.shape[0])
 
     def reset(self):
         self.done_steps = 0

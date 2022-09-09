@@ -1,3 +1,3 @@
-constructor: "cascade.discrete_envs.HopperDiscrete"
+constructor: "rlberry.envs.make_hopper.make_hopper"
 params:
-    horizon: null
+    id: "HopperDiscrete"

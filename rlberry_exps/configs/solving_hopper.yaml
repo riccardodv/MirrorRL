@@ -3,5 +3,5 @@ seed: 23
 train_env: './configs/envs/hopper.yaml'
 eval_env: './configs/envs/hopper.yaml'
 agents:
-    - './configs/a2c/a2c_hopper.yaml' 
-    # - './configs/dqn/dqn_pendulum.yaml'
+    # - './configs/a2c/a2c_hopper.yaml' 
+    - './configs/dqn/dqn_hopper.yaml'
