@@ -8,14 +8,15 @@ from cascade.nn import CascadeQ
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
-from cascade.discrete_envs import PendulumDiscrete
+from cascade.discrete_envs import PendulumDiscrete, HopperDiscrete
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
 # ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
-ENV_ID = "DiscretePendulum"
+# ENV_ID = "DiscretePendulum"
+ENV_ID = "HopperDiscrete"
 MAX_EPOCH = 150
 
 default_config = {
@@ -30,7 +31,7 @@ default_config = {
         "eta": 0.1,
         "gamma": 0.99,
         "seed": 0,
-        "env_id": ENV_ID,
+        # "env_id": ENV_ID,
         "max_epoch": MAX_EPOCH,
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
@@ -82,6 +83,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
     if env_id == 'DiscretePendulum':
         env = PendulumDiscrete()
+    elif env_id == "HopperDiscrete":
+        env = HopperDiscrete()
     else:
         env = EnvWithTerminal(gym.make(env_id))
     
