@@ -10,7 +10,7 @@ from cascade.nn import CascadeQ
 
 import os
 import pandas as pd
-from cascade.discrete_envs import PendulumDiscrete
+from cascade.discrete_envs import PendulumDiscrete, HopperDiscrete
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
@@ -18,8 +18,9 @@ from ray.tune.schedulers import ASHAScheduler
 # ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
-ENV_ID = "LunarLander-v2"
-MAX_EPOCH = 1
+ENV_ID = "HopperDiscrete"
+# ENV_ID = "LunarLander-v2"
+MAX_EPOCH = 150
 
 default_config = {
         "env_id": ENV_ID,
@@ -86,6 +87,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
     if env_id == 'DiscretePendulum':
         env = PendulumDiscrete()
+    elif env_id == "HopperDiscrete":
+        env = HopperDiscrete()
     else:
         env = EnvWithTerminal(gym.make(env_id))
     
