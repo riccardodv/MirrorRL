@@ -1,0 +1,3 @@
+constructor: "cascade.discrete_envs.HopperDiscrete"
+params:
+    horizon: null
