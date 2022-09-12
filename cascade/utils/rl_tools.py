@@ -2,6 +2,13 @@ import numpy as np
 import warnings
 import torch
 
+from gym.wrappers import FlattenObservation
+
+
+
+
+
+
 
 def merge_data_(d1, d2, max_len):
     if not d1:
@@ -14,11 +21,17 @@ def merge_data_(d1, d2, max_len):
 
 
 class EnvWithTerminal:
-    def __init__(self, env):
+    def __init__(self, env, transform1D = True):
         self.env = env
-        self.horizon = self.env._max_episode_steps
+        try:
+            self.horizon = self.env._max_episode_steps
+        except:
+            self.horizon = np.inf
         self.env._max_episode_steps = np.inf
         self.done_steps = 0
+        self.transform1D = transform1D
+        if transform1D:
+            self.env = FlattenObservation(self.env)
 
     def reset(self):
         self.done_steps = 0

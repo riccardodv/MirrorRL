@@ -16,7 +16,8 @@ from ray.tune.schedulers import ASHAScheduler
 # ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
-ENV_ID = "HopperDiscrete"
+# ENV_ID = "HopperDiscrete"
+ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
 MAX_EPOCH = 150
 
 default_config = {
