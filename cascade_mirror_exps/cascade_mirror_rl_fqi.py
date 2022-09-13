@@ -117,7 +117,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         with torch.no_grad():
             if data:
-                data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']).to(device), cascade_qfunc, eta, squeeze_out=False)
+                data['nact'] = softmax_policy(data['nobs'].float().to(device), cascade_qfunc, eta, squeeze_out=False)
+                #data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']).to(device), cascade_qfunc, eta, squeeze_out=False)
 
         merge_data_(data, roll, max_replay_memory_size)
 
@@ -275,7 +276,8 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         config=config,
         num_samples=num_samples,
         scheduler=scheduler,
-        progress_reporter=reporter)
+        progress_reporter=reporter,
+        verbose = 0)
 
     best_trial = result.get_best_trial("average_reward", "max", "last-10-avg")
     print("Best trial config: {}".format(best_trial.config))
@@ -309,6 +311,6 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
 
 
 if __name__ == '__main__':
-    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
-    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
-    run(default_config, save_model_dir='models')
+    main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
+    #main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
+    #run(default_config, save_model_dir='models')

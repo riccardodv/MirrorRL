@@ -70,14 +70,14 @@ class Sampler:
     def _rollout(self, render=False, device='cpu'):
         # Generates SARSA type transitions until episode's end
         obs = self.env.reset()
-        obs_tensor = torch.FloatTensor(obs, device=device)
+        obs_tensor = torch.FloatTensor(obs).to(device)
         act = self.policy(obs_tensor)
         done = False
         while not done:
             if render:
                 self.env.render()
             nobs, rwd, done, terminal = self.env.step(act)
-            nobs_tensor = torch.FloatTensor(nobs, device=device)
+            nobs_tensor = torch.FloatTensor(nobs).to(device)
             nact = self.policy(nobs_tensor)
             yield obs, act, rwd, done, terminal, nobs, nact
             obs = nobs
@@ -103,7 +103,7 @@ class Sampler:
                 self.curr_rollout = self._rollout(render, device)
 
         for key in set(keys):
-            paths[key] = torch.FloatTensor(np.asarray(paths[key]), device=device)
+            paths[key] = torch.FloatTensor(np.asarray(paths[key])).to(device)
             if paths[key].ndim == 1:
                 paths[key] = paths[key].unsqueeze(1)
         return paths
@@ -111,7 +111,7 @@ class Sampler:
 
 def update_logging_stats(rwds, dones, curr_cum_rwd, returns_list, total_ts):
     for r, d in zip(rwds, dones):
-        curr_cum_rwd += r[0]
+        curr_cum_rwd += r[0].item()
         if d:
             returns_list.append(curr_cum_rwd)
             curr_cum_rwd = 0
