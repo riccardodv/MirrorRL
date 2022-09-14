@@ -2,11 +2,14 @@ import numpy as np
 import warnings
 import torch
 
+import gym
 from gym.wrappers import FlattenObservation
 
 
 
-
+def create_flatten_environment(id):
+    env = gym.make(id)
+    return FlattenObservation(env)
 
 
 

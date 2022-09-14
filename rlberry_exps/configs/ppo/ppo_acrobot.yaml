@@ -1,0 +1,31 @@
+agent_class: 'rlberry.agents.torch.PPOAgent'
+init_kwargs:
+    learning_rate: 0.0003
+    k_epochs: 4
+    n_steps: 256
+    entr_coef: 0.0
+    gae_lambda: 0.94
+    normalize_rewards: False
+    optimizer_type: 'RMS_PROP'
+    policy_net_fn: 'rlberry.agents.torch.utils.training.model_factory_from_env'
+    policy_net_kwargs:
+      type: 'MultiLayerPerceptron'
+      layer_sizes: [64, 64]
+      reshape: False
+      is_policy: True
+    value_net_fn: 'rlberry.agents.torch.utils.training.model_factory_from_env'
+    value_net_kwargs:
+      type: "MultiLayerPerceptron"
+      layer_sizes: 
+        - 64
+        - 64
+      reshape: False
+      out_size: 1
+#     entr_coef: 0.01
+# eval_kwargs:
+#     eval_horizon: 200
+n_fit: 1
+fit_kwargs:
+    fit_budget: 1_000_000
+agent_name: "PPO rlberry agent for Acrobot"
+
