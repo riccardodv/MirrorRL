@@ -3,6 +3,7 @@ import torch.nn as nn
 from cascade.utils import clone_lin_model
 
 
+
 class CascadeNeurone(nn.Module):
     def __init__(self, nb_in, nb_out, dim_data_input, non_linearity=nn.ReLU()):
         super().__init__()
@@ -22,7 +23,7 @@ class CascadeNeurone(nn.Module):
 
 
 class CascadeNN(nn.Module):
-    def __init__(self, dim_input, dim_output):
+    def __init__(self, dim_input, dim_output, **kwargs):
         super().__init__()
         self.dim_input = dim_input
         self.dim_output = dim_output
@@ -82,4 +83,7 @@ class CascadeNN(nn.Module):
 
     def feat_last_only(self):
         return [*self.cascade_neurone_list[-1].parameters()]
+
+
+        
 

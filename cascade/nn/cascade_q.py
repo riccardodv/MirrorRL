@@ -3,8 +3,8 @@ from cascade.utils import clone_lin_model
 
 
 class CascadeQ(CascadeNN):
-    def __init__(self, dim_input, dim_output):
-        super().__init__(dim_input, dim_output)
+    def __init__(self, dim_input, dim_output, **kwargs):
+        super().__init__(dim_input, dim_output, **kwargs)
         self.qfunc = clone_lin_model(self.output)
 
     def get_q(self, obs, stack=True):

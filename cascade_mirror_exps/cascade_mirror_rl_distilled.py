@@ -1,10 +1,11 @@
 import gym
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset 
+from torch.utils.data.sampler import RandomSampler, BatchSampler
 
 from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
-from cascade.nn import CascadeQ
+from cascade.nn import CascadeQ, Simple_Cascade
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
@@ -26,33 +27,35 @@ default_config = {
         "nb_samp_per_iter": 10000,
         "min_grad_steps_per_iter": 10000,
         "nb_add_neurone_per_iter": 10,
-        "batch_size": 64,
+        "batch_size": 32,
         "lr_model": 1e-3,
-        "max_replay_memory_size": 10**6,
-        "eta": 0.5  ,
+        "max_replay_memory_size": 10**4,
+        "target_update_freq": 1000,
+        "replay_start_size": 0,
+        "eta": 0.5,
         "gamma": 0.99,
         "seed": 0,
-        # "env_id": ENV_ID,
         "max_epoch": MAX_EPOCH,
-        # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
-        # "lr": tune.loguniform(1e-4, 1e-1),
-        # "batch_size": tune.choice([2, 4, 8, 16])
+        "print_every": 1000,
+        "when_to_distill": np.arange(20, MAX_EPOCH, 20),
+        "distill_epochs": 100,
     }
  
 
 
+class MLP(torch.nn.Module):
+    def __init__(self, sizes, non_lin):
+        super().__init__()
+        ops = []
+        for si, so in zip(sizes[:-1], sizes[1:]):
+            ops.append(torch.nn.Linear(si, so))
+            ops.append(non_lin)
+        self.f = torch.nn.Sequential(*ops[:-1])
 
-# def run(env_id='CartPole-v1',
-#          nb_iter=100,
-#          nb_samp_per_iter=10000,
-#          min_grad_steps_per_iter=20000,
-#          nb_add_neurone_per_iter=10,
-#          batch_size=64,
-#          lr_model=1e-3,
-#          max_replay_memory_size=10000,
-#          eta=.1,
-#          gamma = .99
-#          ):
+    def forward(self, x):
+        return self.f(x)
+
+
 
 def run(config, checkpoint_dir=None, save_model_dir=None):
 
@@ -66,7 +69,11 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     max_replay_memory_size = config["max_replay_memory_size"]
     eta = config["eta"]
     gamma = config["gamma"]
-    lam = 0.
+    replay_start_size = config["replay_start_size"]
+    target_update_freq = config["target_update_freq"]
+    print_every = config["print_every"]
+    when_to_distill = config["when_to_distill"]
+    distill_epochs = config["distill_epochs"]
     if "seed" in config.keys():
         seed = config["seed"]
     else:
@@ -108,7 +115,43 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     total_ts = 0
     curr_cum_rwd = 0
     returns_list = []
+
+    if replay_start_size:
+        roll = env_sampler.rollouts(lambda x: softmax_policy(
+            x, cascade_qfunc, eta), min_trans=replay_start_size, max_trans=replay_start_size, device = device)
+        curr_cum_rwd, returns_list, total_ts = update_logging_stats(
+            roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
+
+        merge_data_(data, roll, max_replay_memory_size)
+
+
+
     for iter in range(nb_iter):
+
+        # if iter in when_to_distill:
+        #     print("____DISTILLING____")
+        #     new_cascade = Simple_Cascade(cascade_qfunc.dim_input, cascade_qfunc.dim_output, [cascade_qfunc.nb_hidden])
+        #     new_cascade.merge_with_old_weight_n_bias(model.output.weight, model.output.bias)
+        #     optim_distill = torch.optim.Adam([*new_cascade.cascade.parameters()], lr=1e-3)
+        #     #train new cascade using the dataset and other cascade
+
+        #     # should I initialize the weights from the last output? For now yes
+        #     # the compression of weights should be done more in relative based knowledge distillation
+        #     data_loader_train = DataLoader(TensorDataset(X_train, Y_train), batch_size=16, shuffle=True, drop_last=True)
+        #     # old_w, olb_b = new_cascade.output.weight, new_cascade.output.bias
+        #     for i in range(distill_epochs):
+        #         # print("mse between old w and cur w: ", loss(old_w, new_cascade.output.weight))
+        #         for x, y in data_loader_train:
+        #             new_cascade_features = new_cascade.get_features(x)
+        #             old_cascade_features = model.get_features(x)
+        #             loss_feat = loss(new_cascade_features, old_cascade_features)
+        #             loss_out = loss(new_cascade(x), y)
+        #             final_loss = loss_feat + loss_out
+        #             final_loss.backward()
+        #             optim_distill.step()
+            
+        #     #distilled model is trained
+        #     model = new_cascade
 
         roll = env_sampler.rollouts(lambda x: softmax_policy(
             x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
@@ -163,51 +206,45 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nbInputs, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
         # cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
         cascade_qfunc.to(device)
-        # data_loader = DataLoader(TensorDataset(obs_feat, act, obs_q, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
-        grad_steps = 0
-        while grad_steps < min_grad_steps_per_iter:
-            # train
-            train_losses = []
-            deltas = []
-            with torch.no_grad():
-                newqsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(
-                    dim=1, index=nact)  # q-value for the next state and actions taken in the next states
-                q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal - obs_q # do we really need to update Q-target for each epoch????????????
-                # q_target = get_targets_qvals((nobs_q + newqsp) * not_terminal, rwd, data['done'], gamma, lam) - obs_q
 
-                # newqsp_all = cascade_qfunc.forward_from_old_cascade_features(nobs_feat)
-                # newvsp = (newqsp_all * nobs_old_distrib.probs).sum(1, keepdim=True)
-                # q_target = rwd + gamma * (newvsp + nobs_v) * not_terminal
 
-                data_loader = DataLoader(TensorDataset(
-                    obs_feat, act, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
-            optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
+        optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
                                       *cascade_qfunc.output.parameters()], lr=lr_model)
-            for s, a, tq in data_loader:
-                optim.zero_grad()
-                newqs = cascade_qfunc.forward_from_old_cascade_features(s)
-                qs = newqs.gather(dim=1, index=a)
-                loss = (qs - tq).pow(2).mean()
-                train_losses.append(loss.item())
-                loss.backward()
-                optim.step()
-                grad_steps += 1
-                if grad_steps >= min_grad_steps_per_iter:
-                    break
-            print(
-                f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
+
+        # grad_steps = 0
+        rs = RandomSampler(range(len(obs_feat)), replacement = True, num_samples = min_grad_steps_per_iter * batch_size)
+        bs = BatchSampler(rs, batch_size, drop_last = False)
+        train_losses = []
+        for grad_steps, batch_idx in enumerate(bs):
+            # for grad_steps in range(min_grad_steps_per_iter):
+            if grad_steps % target_update_freq == 0:
+                # train_losses = []
+                with torch.no_grad():
+                    newqsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(
+                        dim=1, index=nact)  # q-value for the next state and actions taken in the next states
+                    q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal - obs_q 
+                    dataset = TensorDataset(obs_feat, act, q_target)
+            s, a, tq = dataset[batch_idx]
+            optim.zero_grad()
+            newqs = cascade_qfunc.forward_from_old_cascade_features(s)
+            qs = newqs.gather(dim=1, index=a)
+            loss = (qs - tq).pow(2).mean()
+            train_losses.append(loss.item())
+            loss.backward()
+            optim.step()
+
+            if (grad_steps + 1) % print_every == 0:
+                print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
+            
+ 
 
         cascade_qfunc.merge_q(old_out)
         with torch.no_grad():
             new_distrib = torch.distributions.Categorical(
                 logits=eta * cascade_qfunc(obs))
-            # kl = torch.distributions.kl_divergence(obs_old_distrib, new_distrib).mean().item()
             kl = stable_kl_div(obs_old_distrib.probs,
                                new_distrib.probs).mean().item()
-            # if kl > 1e30:
-            #     print("KL is too large!")
-            #     print("obs_old_distrib.probs", obs_old_distrib.probs)
-            #     print("new_distrib", new_distrib.probs)
+
             normalized_entropy = new_distrib.entropy().mean().item() / np.log(nb_act)
             print(
                 f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}\n')
@@ -225,22 +262,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
 
 def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpus_per_trial=0.):
-    # config for cartpole
-    # config = {
-    #     "nb_samp_per_iter": tune.grid_search([10000]),
-    #     "min_grad_steps_per_iter": tune.grid_search([10000]),
-    #     "nb_add_neurone_per_iter": tune.grid_search([10]),
-    #     "batch_size": tune.grid_search([64]),
-    #     "lr_model": tune.grid_search([1e-3]),
-    #     "max_replay_memory_size": tune.grid_search([10000]),
-    #     #"eta": tune.loguniform(0.1, 10),
-    #     "eta": tune.grid_search([0.1]),
-    #     "gamma": tune.grid_search([0.99]),
-    #     "seed": tune.grid_search([1, 11, 100, 1001, 2999])
-    #     # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
-    #     # "lr": tune.loguniform(1e-4, 1e-1),
-    #     # "batch_size": tune.choice([2, 4, 8, 16])
-    # }
+
     # config for acrobot
     config = {
         "nb_samp_per_iter": tune.grid_search([10000]),
@@ -295,21 +317,6 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
     ))
 
 
-    # best_trained_model = Net(best_trial.config["l1"], best_trial.config["l2"])
-    # device = "cpu"
-    # if torch.cuda.is_available():
-    #     device = "cuda:0"
-    #     if gpus_per_trial > 1:
-    #         best_trained_model = nn.DataParallel(best_trained_model)
-    # best_trained_model.to(device)
-
-    # best_checkpoint_dir = best_trial.checkpoint.value
-    # model_state, optimizer_state = torch.load(os.path.join(
-    #     best_checkpoint_dir, "checkpoint"))
-    # best_trained_model.load_state_dict(model_state)
-
-    # test_acc = test_accuracy(best_trained_model, device)
-    # print("Best trial test set accuracy: {}".format(test_acc))
 
 
 if __name__ == '__main__':

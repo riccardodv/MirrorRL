@@ -8,4 +8,5 @@ Figures/
 dist/
 build/
 *.png
+*.pyc
 .DS_Store
