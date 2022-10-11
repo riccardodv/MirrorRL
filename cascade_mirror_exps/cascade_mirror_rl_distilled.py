@@ -1,11 +1,12 @@
 import gym
 import numpy as np
 import torch
+from torch import nn
 from torch.utils.data import DataLoader, TensorDataset 
 from torch.utils.data.sampler import RandomSampler, BatchSampler
 
 from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
-from cascade.nn import CascadeQ, Simple_Cascade
+from cascade.nn import CascadeQ, SimpleCascadeQ
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
@@ -14,11 +15,11 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
-# ENV_ID = "CartPole-v1"
+ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
-ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
+# ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 MAX_EPOCH = 150
 
 default_config = {
@@ -37,23 +38,23 @@ default_config = {
         "seed": 0,
         "max_epoch": MAX_EPOCH,
         "print_every": 1000,
-        "when_to_distill": np.arange(20, MAX_EPOCH, 20),
+        "when_to_distill": np.arange(5, MAX_EPOCH, 5),
         "distill_epochs": 100,
     }
  
 
 
-class MLP(torch.nn.Module):
-    def __init__(self, sizes, non_lin):
-        super().__init__()
-        ops = []
-        for si, so in zip(sizes[:-1], sizes[1:]):
-            ops.append(torch.nn.Linear(si, so))
-            ops.append(non_lin)
-        self.f = torch.nn.Sequential(*ops[:-1])
+# class MLP(torch.nn.Module):
+#     def __init__(self, sizes, non_lin):
+#         super().__init__()
+#         ops = []
+#         for si, so in zip(sizes[:-1], sizes[1:]):
+#             ops.append(torch.nn.Linear(si, so))
+#             ops.append(non_lin)
+#         self.f = torch.nn.Sequential(*ops[:-1])
 
-    def forward(self, x):
-        return self.f(x)
+#     def forward(self, x):
+#         return self.f(x)
 
 
 
@@ -101,6 +102,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         env.env.seed(seed)
     
     env_sampler = Sampler(env)
+
+    distill_loss = nn.MSELoss()
     
 
     nb_act = env.get_nb_act()
@@ -128,30 +131,35 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
     for iter in range(nb_iter):
 
-        # if iter in when_to_distill:
-        #     print("____DISTILLING____")
-        #     new_cascade = Simple_Cascade(cascade_qfunc.dim_input, cascade_qfunc.dim_output, [cascade_qfunc.nb_hidden])
-        #     new_cascade.merge_with_old_weight_n_bias(model.output.weight, model.output.bias)
-        #     optim_distill = torch.optim.Adam([*new_cascade.cascade.parameters()], lr=1e-3)
-        #     #train new cascade using the dataset and other cascade
+        if iter in when_to_distill:
+            print("____DISTILLING____")
+            new_cascade = SimpleCascadeQ(cascade_qfunc.dim_input, cascade_qfunc.dim_output, [cascade_qfunc.nb_hidden, cascade_qfunc.nb_hidden])
+            new_cascade.sync_outputs(cascade_qfunc.qfunc, cascade_qfunc.output)
+            # optim_distill = torch.optim.Adam([*new_cascade.parameters()], lr=1e-4)
+            optim_distill = torch.optim.Adam([*new_cascade.cascade.parameters()], lr=1e-4)
+            #train new cascade using the dataset and other cascade
 
-        #     # should I initialize the weights from the last output? For now yes
-        #     # the compression of weights should be done more in relative based knowledge distillation
-        #     data_loader_train = DataLoader(TensorDataset(X_train, Y_train), batch_size=16, shuffle=True, drop_last=True)
-        #     # old_w, olb_b = new_cascade.output.weight, new_cascade.output.bias
-        #     for i in range(distill_epochs):
-        #         # print("mse between old w and cur w: ", loss(old_w, new_cascade.output.weight))
-        #         for x, y in data_loader_train:
-        #             new_cascade_features = new_cascade.get_features(x)
-        #             old_cascade_features = model.get_features(x)
-        #             loss_feat = loss(new_cascade_features, old_cascade_features)
-        #             loss_out = loss(new_cascade(x), y)
-        #             final_loss = loss_feat + loss_out
-        #             final_loss.backward()
-        #             optim_distill.step()
+            #prepare a new dataset
+            obs = data["obs"].to(device)
+            data_loader_train = DataLoader(TensorDataset(obs), batch_size=16, shuffle=True, drop_last=True)
+            # old_w, olb_b = new_cascade.output.weight, new_cascade.output.bias
+            for i in range(distill_epochs):
+                # print("mse between old w and cur w: ", loss(old_w, new_cascade.output.weight))
+                for x in data_loader_train:
+                    if isinstance(x, list):
+                        x = x[0]
+                    new_cascade_features = new_cascade.get_features(x)
+                    old_cascade_features = cascade_qfunc.get_features(x)
+                    loss_feat = distill_loss(new_cascade_features, old_cascade_features)
+                    loss_out = distill_loss(new_cascade.output(new_cascade_features), cascade_qfunc.output(old_cascade_features))
+                    final_loss = loss_feat + 0*loss_out
+                    final_loss.backward()
+                    optim_distill.step()
+
+                print("\t\t\t Distill loss: {}, {}".format(loss_feat.detach().item(), loss_out.detach().item()) )
             
-        #     #distilled model is trained
-        #     model = new_cascade
+            #distilled model is trained
+            cascade_qfunc = new_cascade
 
         roll = env_sampler.rollouts(lambda x: softmax_policy(
             x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
