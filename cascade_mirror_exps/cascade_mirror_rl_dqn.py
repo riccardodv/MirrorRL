@@ -14,11 +14,11 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
-# ENV_ID = "CartPole-v1"
+ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
-ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
+# ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 MAX_EPOCH = 150
 
 default_config = {
@@ -36,7 +36,8 @@ default_config = {
         "gamma": 0.99,
         "seed": 0,
         "max_epoch": MAX_EPOCH,
-        "print_every": 1000
+        "print_every": 1000,
+        "weight_decay": 1e-3
     }
  
 
@@ -57,6 +58,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     replay_start_size = config["replay_start_size"]
     target_update_freq = config["target_update_freq"]
     print_every = config["print_every"]
+    weight_decay = config["weight_decay"]
     if "seed" in config.keys():
         seed = config["seed"]
     else:
@@ -167,7 +169,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
 
         optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
-                                      *cascade_qfunc.output.parameters()], lr=lr_model)
+                                      *cascade_qfunc.output.parameters()], lr=lr_model, weight_decay=weight_decay)
 
         # grad_steps = 0
         rs = RandomSampler(range(len(obs_feat)), replacement = True, num_samples = min_grad_steps_per_iter * batch_size)
