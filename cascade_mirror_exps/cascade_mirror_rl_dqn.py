@@ -14,11 +14,11 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
-ENV_ID = "CartPole-v1"
+# ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
-# ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
+ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 MAX_EPOCH = 150
 
 default_config = {
@@ -198,7 +198,11 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             
  
 
-        cascade_qfunc.merge_q(old_out)
+        if iter == 0:
+            cascade_qfunc.merge_q(old_out, alpha=1)
+        else:
+            cascade_qfunc.merge_q(old_out, alpha=0.1)
+
         with torch.no_grad():
             new_distrib = torch.distributions.Categorical(
                 logits=eta * cascade_qfunc(obs))
