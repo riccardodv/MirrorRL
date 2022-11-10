@@ -29,7 +29,7 @@ class ConCatLayer(torch.nn.Module):
         return torch.cat([x, self.net(x)], dim = self.concat_dim)
 
 class Simple_Cascade(CascadeNN):
-    def __init__(self, dim_input, dim_output, hidden_layer_sizes, non_lin = torch.nn.ReLU()):
+    def __init__(self, dim_input, dim_output, hidden_layer_sizes, non_lin = torch.nn.ReLU(), with_batchnorm = False):
         super().__init__(dim_input, dim_output)
         self.nb_hidden = 0
         self.cascade_neurone_list = []
@@ -37,6 +37,8 @@ class Simple_Cascade(CascadeNN):
         sizes = [dim_input] + hidden_layer_sizes
         for si, so in zip(sizes[:-1], sizes[1:]):
             linear_layer_list.append(torch.nn.Linear(si, so))
+            if with_batchnorm:
+                linear_layer_list.append(torch.nn.BatchNorm1d(so))
             linear_layer_list.append(non_lin)
         self.nb_hidden += so
         self.cascade_neurone_list = [ConCatLayer(nn.Sequential(*linear_layer_list))]

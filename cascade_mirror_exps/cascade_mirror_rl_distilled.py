@@ -5,7 +5,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset 
 from torch.utils.data.sampler import RandomSampler, BatchSampler
 
-from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
+from cascade.utils import EnvWithTerminal, Sampler, merge_data_, prune_data_, update_logging_stats, softmax_policy, get_targets_qvals
 from cascade.nn import CascadeQ, SimpleCascadeQ
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
@@ -21,6 +21,7 @@ ENV_ID = "CartPole-v1"
 # ENV_ID = "HopperDiscrete"
 # ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 MAX_EPOCH = 150
+TEMPERATURE = 0.01
 
 MSEloss = nn.MSELoss()
 CEloss = nn.CrossEntropyLoss()
@@ -43,22 +44,118 @@ default_config = {
         "print_every": 1000,
         "when_to_distill": np.arange(5, MAX_EPOCH, 5),
         "distill_epochs": 100,
-        "loss_mixture": [1,1,1,1,1,0,0,0,0]
+        "loss_mixture": [1,0,0,1,1,0,0,0,0]
     }
  
 
 
-# class MLP(torch.nn.Module):
-#     def __init__(self, sizes, non_lin):
-#         super().__init__()
-#         ops = []
-#         for si, so in zip(sizes[:-1], sizes[1:]):
-#             ops.append(torch.nn.Linear(si, so))
-#             ops.append(non_lin)
-#         self.f = torch.nn.Sequential(*ops[:-1])
 
-#     def forward(self, x):
-#         return self.f(x)
+def distill(cascade_qfunc, data, eta, gamma, distilled_cascade = None, distill_epochs = 10, loss_mixture = [1,0,0,1,1,0,0,0,0]):
+    print("____DISTILLING____")
+    if distilled_cascade is not None:
+        new_cascade = distilled_cascade
+    else:
+        new_cascade = SimpleCascadeQ(cascade_qfunc.dim_input, cascade_qfunc.dim_output, [cascade_qfunc.nb_hidden, cascade_qfunc.nb_hidden])
+        new_cascade.sync_outputs(cascade_qfunc.qfunc, cascade_qfunc.output)
+    
+    optim_feat_distill = torch.optim.Adam([*new_cascade.cascade.parameters()], lr=1e-4, weight_decay=1e-3)
+    optim_out_distill = torch.optim.Adam([*new_cascade.output.parameters()], lr=1e-3, weight_decay=1e-3)
+    optim_q_distill = torch.optim.Adam([*new_cascade.qfunc.parameters()], lr=1e-3, weight_decay=1e-3)
+    #train new cascade using the dataset and other cascade
+
+    #prepare a new dataset
+    obs, act, rwd, nobs, nact, not_terminal = data['obs'], data['act'].long(), \
+        data['rwd'], data['nobs'], data['nact'].long(),\
+        1 - data['terminal'].float()
+    
+    device = cascade_qfunc.device
+
+    obs = obs.to(device)
+    act = act.to(device)
+    rwd = rwd.to(device)
+    nobs = nobs.to(device)
+    nact = nact.to(device)
+    not_terminal = not_terminal.to(device)
+    data_loader_train = DataLoader(TensorDataset(obs, act, rwd, nobs, nact, not_terminal), batch_size=16, shuffle=True, drop_last=True)
+    for i in range(distill_epochs):
+        for exp in data_loader_train:
+            if isinstance(exp, list):
+                x = exp[0]
+            losses = []
+            if loss_mixture[0]>0:
+                loss_feat = feature_loss(x, cascade_qfunc, new_cascade)
+            else:
+                loss_feat = 0
+
+            if loss_mixture[1]>0:
+                loss_ce = ce_loss(x, eta, cascade_qfunc, new_cascade, False)
+            else:
+                loss_ce = 0
+
+            if loss_mixture[2]>0:
+                loss_bellman_q = bellman_q_loss(exp, gamma, new_cascade, False)
+            else:
+                loss_bellman_q =0
+
+            if loss_mixture[3]>0:
+                loss_out = output_loss(x, cascade_qfunc, new_cascade, False)
+            else:
+                loss_out = 0
+
+            if loss_mixture[4]>0:
+                loss_q = q_loss(x, cascade_qfunc, new_cascade, False)
+            else:
+                loss_q = 0
+
+            if loss_mixture[5]>0:
+                loss_ce_detached = ce_loss(x, eta, cascade_qfunc, new_cascade)
+            else:
+                loss_ce_detached = 0
+            
+            if loss_mixture[6]>0:
+                loss_bellman_q_detached = bellman_q_loss(exp, gamma, new_cascade)
+            else:
+                loss_bellman_q_detached = 0
+
+            if loss_mixture[7]>0:
+                loss_out_detached = output_loss(x, cascade_qfunc, new_cascade)
+            else:
+                loss_out_detached = 0
+            if loss_mixture[8]>0:
+                loss_q_detached = q_loss(x, cascade_qfunc, new_cascade)
+            else:
+                loss_q_detached = 0
+                
+            losses.append(loss_feat)
+            losses.append(loss_ce)
+            losses.append(loss_bellman_q)
+            losses.append(loss_out)
+            losses.append(loss_q)
+            losses.append(loss_ce_detached)
+            losses.append(loss_bellman_q_detached)
+            losses.append(loss_out_detached)
+            losses.append(loss_q_detached)
+
+            final_loss = sum([l*k for l, k in zip(losses, loss_mixture)])
+
+            final_loss.backward()
+
+            # new_cascade_features = new_cascade.get_features(x)
+            # old_cascade_features = cascade_qfunc.get_features(x)
+            # loss_feat = distill_loss(new_cascade_features, old_cascade_features)
+            # loss_out = distill_loss(new_cascade.output(new_cascade_features.detach()), cascade_qfunc.output(old_cascade_features.detach()))
+            # loss_q = distill_loss(new_cascade.qfunc(new_cascade_features.detach()), cascade_qfunc.qfunc(old_cascade_features.detach()))
+            
+            # loss_feat.backward()
+            # loss_out.backward()
+            # loss_q.backward()
+
+            optim_feat_distill.step()
+            optim_out_distill.step()
+            optim_q_distill.step()
+
+        print("\t\t\t Distill loss: feat= {}, ce= {}, bellman={}, out={}, q={}".format(loss_feat.detach().item(), loss_ce.detach().item(), loss_bellman_q.detach().item(), loss_out.detach().item(), loss_q.detach().item()))
+    return new_cascade
 
 
 
@@ -103,14 +200,15 @@ def bellman_q_loss(exp, gamma, cascade2, detach=True):
     return MSEloss(obs_q, q_target)
 
 
-def ce_loss(x, eta, cascade1, cascade2, detach = True):
+def ce_loss(x, eta, cascade1, cascade2, temperature=TEMPERATURE, detach = True):
+    t = temperature
     old_cascade_features = cascade1.get_features(x)
     new_cascade_features = cascade2.get_features(x)
     sm = nn.Softmax(dim = 1)
     if detach:
         old_cascade_features = old_cascade_features.detach()
         new_cascade_features = new_cascade_features.detach()
-    old_probs = sm(eta * cascade1.qfunc(old_cascade_features))
+    old_probs = sm(eta / t * cascade1.qfunc(old_cascade_features))
     new_logits = eta * cascade2.qfunc(new_cascade_features)
     return CEloss(new_logits, old_probs)
     
@@ -192,76 +290,6 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
     for iter in range(nb_iter):
 
-        if iter in when_to_distill:
-            print("____DISTILLING____")
-            new_cascade = SimpleCascadeQ(cascade_qfunc.dim_input, cascade_qfunc.dim_output, [cascade_qfunc.nb_hidden, cascade_qfunc.nb_hidden])
-            new_cascade.sync_outputs(cascade_qfunc.qfunc, cascade_qfunc.output)
-            # optim_distill = torch.optim.Adam([*new_cascade.parameters()], lr=1e-4)
-            optim_feat_distill = torch.optim.Adam([*new_cascade.cascade.parameters()], lr=1e-4, weight_decay=1e-3)
-            optim_out_distill = torch.optim.Adam([*new_cascade.output.parameters()], lr=1e-3, weight_decay=1e-3)
-            optim_q_distill = torch.optim.Adam([*new_cascade.qfunc.parameters()], lr=1e-3, weight_decay=1e-3)
-            #train new cascade using the dataset and other cascade
-
-            #prepare a new dataset
-            # obs = data["obs"].to(device)
-            obs, act, rwd, nobs, nact, not_terminal = data['obs'], data['act'].long(), \
-                data['rwd'], data['nobs'], data['nact'].long(),\
-                1 - data['terminal'].float()
-
-            obs = obs.to(device)
-            act = act.to(device)
-            rwd = rwd.to(device)
-            nobs = nobs.to(device)
-            nact = nact.to(device)
-            not_terminal = not_terminal.to(device)
-            data_loader_train = DataLoader(TensorDataset(obs, act, rwd, nobs, nact, not_terminal), batch_size=16, shuffle=True, drop_last=True)
-            for i in range(distill_epochs):
-                for exp in data_loader_train:
-                    if isinstance(exp, list):
-                        x = exp[0]
-                    losses = []
-                    loss_feat = feature_loss(x, cascade_qfunc, new_cascade)
-                    loss_ce_detached = ce_loss(x, eta, cascade_qfunc, new_cascade)
-                    loss_ce = ce_loss(x, eta, cascade_qfunc, new_cascade, False)
-                    loss_out_detached = output_loss(x, cascade_qfunc, new_cascade)
-                    loss_out = output_loss(x, cascade_qfunc, new_cascade, False)
-                    loss_q_detached = q_loss(x, cascade_qfunc, new_cascade)
-                    loss_q = q_loss(x, cascade_qfunc, new_cascade, False)
-                    loss_bellman_q_detached = bellman_q_loss(exp, gamma, new_cascade)
-                    loss_bellman_q = bellman_q_loss(exp, gamma, new_cascade, False)
-                    losses.append(loss_feat)
-                    losses.append(loss_ce)
-                    losses.append(loss_bellman_q)
-                    losses.append(loss_out)
-                    losses.append(loss_q)
-                    losses.append(loss_ce_detached)
-                    losses.append(loss_bellman_q_detached)
-                    losses.append(loss_out_detached)
-                    losses.append(loss_q_detached)
-
-                    final_loss = sum([l*k for l, k in zip(losses, loss_mixture)])
-
-                    final_loss.backward()
-
-                    # new_cascade_features = new_cascade.get_features(x)
-                    # old_cascade_features = cascade_qfunc.get_features(x)
-                    # loss_feat = distill_loss(new_cascade_features, old_cascade_features)
-                    # loss_out = distill_loss(new_cascade.output(new_cascade_features.detach()), cascade_qfunc.output(old_cascade_features.detach()))
-                    # loss_q = distill_loss(new_cascade.qfunc(new_cascade_features.detach()), cascade_qfunc.qfunc(old_cascade_features.detach()))
-                    
-                    # loss_feat.backward()
-                    # loss_out.backward()
-                    # loss_q.backward()
-
-                    optim_feat_distill.step()
-                    optim_out_distill.step()
-                    optim_q_distill.step()
-
-                # print("\t\t\t Distill loss: {}, {}, {}".format(loss_feat.detach().item(), loss_out.detach().item(), loss_q.detach().item()))
-                print("\t\t\t Distill loss: feat= {}, ce= {}, bellman={}, out={}, q={}".format(loss_feat.detach().item(), loss_ce.detach().item(), loss_bellman_q.detach().item(), loss_out.detach().item(), loss_q.detach().item()))
-            
-            #distilled model is trained
-            cascade_qfunc = new_cascade
 
         roll = env_sampler.rollouts(lambda x: softmax_policy(
             x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
@@ -273,7 +301,16 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
                 data['nact'] = softmax_policy(data['nobs'].float().to(device), cascade_qfunc, eta, squeeze_out=False)
                 #data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']).to(device), cascade_qfunc, eta, squeeze_out=False)
 
-        merge_data_(data, roll, max_replay_memory_size)
+        merge_data_(data, roll, 2*max_replay_memory_size)
+
+        if iter in when_to_distill:
+            new_cascade = distill(cascade_qfunc, data, eta, gamma, distill_epochs=distill_epochs, loss_mixture=loss_mixture)
+            
+            #distilled model is trained
+            cascade_qfunc = new_cascade
+        
+        prune_data_(data, max_replay_memory_size)
+
 
         obs, act, rwd, nobs, nact, not_terminal = data['obs'], data['act'].long(), \
             data['rwd'], data['nobs'], data['nact'].long(),\

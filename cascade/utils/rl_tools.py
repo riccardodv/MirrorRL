@@ -22,6 +22,10 @@ def merge_data_(d1, d2, max_len):
             d1[key] = torch.vstack([d1[key], d2[key]])
             d1[key] = d1[key][-max_len:]
 
+def prune_data_(d, max_len):
+    for key in d.keys():
+        d[key] = d[key][-max_len:]
+
 
 class EnvWithTerminal:
     def __init__(self, env, transform1D = True):

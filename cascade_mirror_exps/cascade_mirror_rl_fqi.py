@@ -17,7 +17,7 @@ from ray.tune.schedulers import ASHAScheduler
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
-ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
+ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
 MAX_EPOCH = 150
 
 default_config = {
@@ -25,11 +25,11 @@ default_config = {
         "max_epoch": MAX_EPOCH,
         "nb_samp_per_iter": 10000,
         "min_grad_steps_per_iter": 10000,
-        "nb_add_neurone_per_iter": 10,
+        "nb_add_neurone_per_iter": 50,
         "batch_size": 64,
         "lr_model": 1e-3,
-        "max_replay_memory_size": 10**6,
-        "eta": 0.5  ,
+        "max_replay_memory_size": 10**4,
+        "eta": 1,
         "gamma": 0.99,
         "seed": 0,
         # "env_id": ENV_ID,
@@ -197,7 +197,10 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             print(
                 f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
 
-        cascade_qfunc.merge_q(old_out)
+        if iter == 0:
+            cascade_qfunc.merge_q(old_out, coef = 1)
+        else:
+            cascade_qfunc.merge_q(old_out)
         with torch.no_grad():
             new_distrib = torch.distributions.Categorical(
                 logits=eta * cascade_qfunc(obs))
