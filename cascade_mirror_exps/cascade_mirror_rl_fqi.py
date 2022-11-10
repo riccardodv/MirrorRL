@@ -31,7 +31,7 @@ default_config = {
         "batch_size": 64,
         "lr_model": 1e-3,
         "max_replay_memory_size": 10**4,
-        "eta": 1  ,
+        "eta": 1,
         "gamma": 0.99,
         "seed": 0,
         "nb_inputs": 50 # number of inputs to connect to without the input state dimension
