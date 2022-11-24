@@ -18,6 +18,8 @@ from ray.tune.schedulers import ASHAScheduler
 # ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
 ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
+# ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
+
 MAX_EPOCH = 150
 
 default_config = {
@@ -32,6 +34,7 @@ default_config = {
         "eta": 1,
         "gamma": 0.99,
         "seed": 0,
+        "nb_inputs": 50 # number of inputs to connect to without the input state dimension
         # "env_id": ENV_ID,
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
@@ -107,6 +110,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     total_ts = 0
     curr_cum_rwd = 0
     returns_list = []
+    alpha = torch.nn.Parameter(torch.tensor(1.0))
+
     for iter in range(nb_iter):
 
         roll = env_sampler.rollouts(lambda x: softmax_policy(
@@ -145,10 +150,12 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
             old_out = clone_lin_model(cascade_qfunc.output)
 
+        # specify connectivity to previous hidden neurons
         nbInputs = obs_feat.shape[1]
         if "nb_inputs" in config.keys():
-            if config["nb_inputs"] >= dim_s:
+            if config["nb_inputs"] >= 0:
                 nbInputs = config["nb_inputs"]
+                nbInputs += dim_s
 
         cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nbInputs, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
         cascade_qfunc.to(device)
@@ -179,11 +186,11 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
 
 
-        alpha = torch.nn.Parameter(torch.tensor(1.0))
+        
 
         optim_alpha = torch.optim.Adam([alpha], lr = 0.01)
 
-        for e in range(100):
+        for e in range(500):
             optim_alpha.zero_grad()
             qsp= cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)  # q-value for the next state and actions taken in the next states
             q_target = rwd + gamma * (nobs_q + alpha * qsp.detach()) * not_terminal - obs_q
@@ -192,11 +199,6 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             loss.backward()
             optim_alpha.step()
             print("\t \t alpha error = {}, alpha = {}".format(loss.item(), alpha.data))
-
-
-        
-
-
 
 
         if iter == 0:
