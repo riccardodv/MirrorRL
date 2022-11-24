@@ -2,7 +2,50 @@ import torch
 import torch.nn as nn
 from cascade.utils import clone_lin_model
 
+class FeedForward(torch.nn.Module):
+    def __init__(self, in_size, out_size, layer_sizes, activation='RELU'):
+        super().__init__()
+        self.layers = torch.nn.ModuleList()
+        for i in range(len(layer_sizes)):
+            if i == 0:
+                self.layers.append(torch.nn.Linear(in_size, layer_sizes[i]))
+            else:
+                self.layers.append(torch.nn.Linear(layer_sizes[i-1], layer_sizes[i]))
+        self.output = torch.nn.Linear(layer_sizes[-1], out_size)
+        if activation == 'RELU':
+            self.activation = torch.nn.ReLU()
+        elif activation == 'SIGMOID':
+            self.activation = torch.nn.Sigmoid()
+        elif activation == 'TANH':
+            self.activation = torch.nn.Tanh()
+        elif activation == 'IDENTITY':
+            self.activation = torch.nn.Identity()
+        else:
+            raise ValueError('Activation not supported')
 
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+            x = self.activation(x)
+        return self.output(x)
+
+    def reset_parameters(self):
+        for layer in self.layers:
+            layer.reset_parameters()
+
+class EnsembleNN(nn.Module):
+    def __init__(self, models):
+        super.__init__()
+        self.models = models
+
+    def add_model(self, model):
+        self.models.append(model)
+    
+    def forward(self, x):
+        s = 0
+        for m in self.models:
+            s = s + m(x)
+        return s
 
 class CascadeNeurone(nn.Module):
     def __init__(self, nb_in, nb_out, dim_data_input, non_linearity=nn.ReLU()):
