@@ -35,7 +35,7 @@ class FeedForward(torch.nn.Module):
 
 class EnsembleNN(nn.Module):
     def __init__(self, models):
-        super.__init__()
+        super().__init__()
         self.models = models
 
     def add_model(self, model):
