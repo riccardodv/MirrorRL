@@ -12,18 +12,14 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 
-# ENV_ID = "CartPole-v1"
+ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
-ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
+# ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 MAX_EPOCH = 150
 
-def ensemble(x, models):
-    s = 0
-    for m in models:
-        s = s + m(x)
-    return s
+
 
 
 
@@ -32,7 +28,7 @@ default_config = {
         "max_epoch": MAX_EPOCH,
         "nb_samp_per_iter": 10000,
         "min_grad_steps_per_iter": 10000,
-        "nb_add_neurone_per_iter": 50,
+        "nb_add_neurone_per_iter": 10,
         "batch_size": 64,
         "lr_model": 1e-3,
         "max_replay_memory_size": 10**4,
@@ -139,6 +135,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
 
         qfunc = FeedForward(dim_s, nb_act, [nb_add_neurone_per_iter])
+        if iter > 0:
+            qfunc.copy_model(ensemble_nn.models[-1])
         qfunc.to(device)
 
 
@@ -147,7 +145,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             # train
             train_losses = []
             with torch.no_grad():
-                qsp = qfunc(obs).gather(dim=1, index = nact)
+                qsp = qfunc(nobs).gather(dim=1, index = nact)
                 q_target = rwd + gamma*(qsp)*not_terminal
                 # q_target = rwd + gamma * (nobs_q + qsp) * not_terminal - obs_q
 
@@ -221,9 +219,9 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         "lr_model": tune.grid_search([1e-3]),
         "max_replay_memory_size": tune.grid_search([10000]),
         #"eta": tune.loguniform(0.1, 10),
-        "eta": tune.grid_search([0.1]), # the smaller the better, best around 0.1, 0.5
+        "eta": tune.grid_search([1]), # the smaller the better, best around 0.1, 0.5
         "gamma": tune.grid_search([0.99]),
-        "seed": tune.grid_search([1]),
+        "seed": tune.grid_search([1, 2, 3]),
         "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
         "env_id" : tune.grid_search([ENV_ID]), 
         "max_epoch": tune.grid_search([MAX_EPOCH])

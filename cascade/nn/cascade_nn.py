@@ -33,6 +33,13 @@ class FeedForward(torch.nn.Module):
         for layer in self.layers:
             layer.reset_parameters()
 
+    def copy_model(self, external_nn):
+        for i in range(len(self.layers)):
+            self.layers[i] = clone_lin_model(external_nn.layers[i])
+        self.output = clone_lin_model(external_nn.output)
+        self.activation = external_nn.activation
+
+
 class EnsembleNN(nn.Module):
     def __init__(self, models):
         super().__init__()
