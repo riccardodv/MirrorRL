@@ -54,6 +54,13 @@ class EnsembleNN(nn.Module):
             s = s + m(x)
         return s
 
+    def forward_boosting(self, x):
+        s = 0
+        for i in range(len(self.models)):
+            coef = len(self.models) - i
+            s = s + coef*self.models[i](x)
+        return s
+
 class CascadeNeurone(nn.Module):
     def __init__(self, nb_in, nb_out, dim_data_input, non_linearity=nn.ReLU()):
         super().__init__()

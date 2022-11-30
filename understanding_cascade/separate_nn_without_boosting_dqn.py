@@ -1,12 +1,16 @@
 import gym
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset 
+from torch.utils.data.sampler import RandomSampler, BatchSampler
 
-from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy
+from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
+from cascade.nn import CascadeQ
+
 from cascade.nn import FeedForward, EnsembleNN
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
+import pandas as pd
 from cascade.discrete_envs import PendulumDiscrete, HopperDiscrete
 from ray import tune
 from ray.tune import CLIReporter
@@ -19,29 +23,25 @@ ENV_ID = "CartPole-v1"
 # ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 MAX_EPOCH = 150
 
-
-
-
-
 default_config = {
         "env_id": ENV_ID,
         "max_epoch": MAX_EPOCH,
         "nb_samp_per_iter": 10000,
         "min_grad_steps_per_iter": 10000,
         "nb_add_neurone_per_iter": 10,
-        "batch_size": 64,
+        "batch_size": 32,
         "lr_model": 1e-3,
         "max_replay_memory_size": 10**4,
-        "eta": 1,
+        "target_update_freq": 1000,
+        "replay_start_size": 0,
+        "eta": 0.5,
         "gamma": 0.99,
         "seed": 0,
-        # "env_id": ENV_ID,
-        # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
-        # "lr": tune.loguniform(1e-4, 1e-1),
-        # "batch_size": tune.choice([2, 4, 8, 16])
+        "max_epoch": MAX_EPOCH,
+        "print_every": 1000,
+        "weight_decay": 1e-3
     }
  
-
 
 
 
@@ -57,7 +57,10 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     max_replay_memory_size = config["max_replay_memory_size"]
     eta = config["eta"]
     gamma = config["gamma"]
-    lam = 0.
+    replay_start_size = config["replay_start_size"]
+    target_update_freq = config["target_update_freq"]
+    print_every = config["print_every"]
+    weight_decay = config["weight_decay"]
     if "seed" in config.keys():
         seed = config["seed"]
     else:
@@ -85,27 +88,40 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         env.env.seed(seed)
     
     env_sampler = Sampler(env)
+
     
 
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
+    # cascade_qfunc = CascadeQ(dim_s, nb_act)
+    neurone_non_linearity = torch.nn.Tanh()
+
+    # cascade_qfunc.to(device)
+
     # models = []
     qfunc = FeedForward(dim_s, nb_act, [nb_add_neurone_per_iter])
     qfunc.to(device)
 
     ensemble_nn = EnsembleNN([])
-
-    # neurone_non_linearity = torch.nn.Tanh()
-
-
     ensemble_qfunc = qfunc
-
-
+    #print("\n\n\n DATA initially \n\n\n", [p for p in cascade_qfunc.parameters()], "\n\n\n")
     data = {}
     total_ts = 0
     curr_cum_rwd = 0
     returns_list = []
+
+    if replay_start_size:
+        roll = env_sampler.rollouts(lambda x: softmax_policy(
+            x, ensemble_qfunc, eta), min_trans=replay_start_size, max_trans=replay_start_size, device = device)
+        curr_cum_rwd, returns_list, total_ts = update_logging_stats(
+            roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
+
+        merge_data_(data, roll, max_replay_memory_size)
+
+
+
     for iter in range(nb_iter):
+
         roll = env_sampler.rollouts(lambda x: softmax_policy(
             x, ensemble_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(
@@ -114,6 +130,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         with torch.no_grad():
             if data:
                 data['nact'] = softmax_policy(data['nobs'].float().to(device), ensemble_qfunc, eta, squeeze_out=False)
+                #data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']).to(device), cascade_qfunc, eta, squeeze_out=False)
 
         merge_data_(data, roll, max_replay_memory_size)
 
@@ -130,8 +147,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         not_terminal = not_terminal.to(device)
 
 
-        print(f'iter {iter} ntransitions {total_ts} avr_return_last_20 {np.mean(returns_list[-20:])}')
-
+        print(
+            f'iter {iter} ntransitions {total_ts} avr_return_last_20 {np.mean(returns_list[-20:])}')
 
 
         qfunc = FeedForward(dim_s, nb_act, [nb_add_neurone_per_iter])
@@ -139,35 +156,37 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             qfunc.copy_model(ensemble_nn.models[-1])
         qfunc.to(device)
 
+        optim = torch.optim.Adam([*qfunc.parameters()], lr=lr_model, weight_decay=weight_decay)
 
 
-        grad_steps = 0
-        while grad_steps < min_grad_steps_per_iter:
-            # train
-            train_losses = []
-            with torch.no_grad():
-                qsp = qfunc(nobs).gather(dim=1, index = nact)
-                q_target = rwd + gamma*(qsp)*not_terminal
-                # q_target = rwd + gamma * (nobs_q + qsp) * not_terminal - obs_q
 
-                data_loader = DataLoader(TensorDataset(
-                    obs, act, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
 
-            optim = torch.optim.Adam([*qfunc.parameters()], lr=lr_model)
-            for s, a, tq in data_loader:
-                optim.zero_grad()
-                qs = qfunc(s).gather(dim=1, index=a)
-                loss = (qs - tq).pow(2).mean()
-                train_losses.append(loss.item())
-                loss.backward()
-                optim.step()
-                grad_steps += 1
-                if grad_steps >= min_grad_steps_per_iter:
-                    break
-            print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
+        # grad_steps = 0
+        rs = RandomSampler(range(len(obs)), replacement = True, num_samples = min_grad_steps_per_iter * batch_size)
+        bs = BatchSampler(rs, batch_size, drop_last = False)
+        train_losses = []
+        for grad_steps, batch_idx in enumerate(bs):
+            # for grad_steps in range(min_grad_steps_per_iter):
+            if grad_steps % target_update_freq == 0:
+                # train_losses = []
+                with torch.no_grad():
+                    newqsp = qfunc(nobs).gather(
+                        dim=1, index=nact)  # q-value for the next state and actions taken in the next states
+                    q_target = rwd + gamma * (newqsp) * not_terminal # do we really need to update Q-target for each epoch????????????
+                    dataset = TensorDataset(obs, act, q_target)
+            s, a, tq = dataset[batch_idx]
+            optim.zero_grad()
+            newqs = qfunc(s)
+            qs = newqs.gather(dim=1, index=a)
+            loss = (qs - tq).pow(2).mean()
+            train_losses.append(loss.item())
+            loss.backward()
+            optim.step()
 
-        # getting other nn in the ensemble
-        # models.append(qfunc)
+            if (grad_steps + 1) % print_every == 0:
+                print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
+            
+ 
         ensemble_nn.add_model(qfunc)
         ensemble_qfunc = ensemble_nn
         # ensemble_qfunc = lambda x: ensemble(x, models)
@@ -195,22 +214,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
 
 def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpus_per_trial=0.):
-    # config for cartpole
-    # config = {
-    #     "nb_samp_per_iter": tune.grid_search([10000]),
-    #     "min_grad_steps_per_iter": tune.grid_search([10000]),
-    #     "nb_add_neurone_per_iter": tune.grid_search([10]),
-    #     "batch_size": tune.grid_search([64]),
-    #     "lr_model": tune.grid_search([1e-3]),
-    #     "max_replay_memory_size": tune.grid_search([10000]),
-    #     #"eta": tune.loguniform(0.1, 10),
-    #     "eta": tune.grid_search([0.1]),
-    #     "gamma": tune.grid_search([0.99]),
-    #     "seed": tune.grid_search([1, 11, 100, 1001, 2999])
-    #     # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
-    #     # "lr": tune.loguniform(1e-4, 1e-1),
-    #     # "batch_size": tune.choice([2, 4, 8, 16])
-    # }
+
     # config for acrobot
     config = {
         "nb_samp_per_iter": tune.grid_search([10000]),
@@ -220,9 +224,9 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         "lr_model": tune.grid_search([1e-3]),
         "max_replay_memory_size": tune.grid_search([10000]),
         #"eta": tune.loguniform(0.1, 10),
-        "eta": tune.grid_search([1]), # the smaller the better, best around 0.1, 0.5
+        "eta": tune.grid_search([0.1]), # the smaller the better, best around 0.1, 0.5
         "gamma": tune.grid_search([0.99]),
-        "seed": tune.grid_search([1, 2, 3]),
+        "seed": tune.grid_search([1]),
         "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
         "env_id" : tune.grid_search([ENV_ID]), 
         "max_epoch": tune.grid_search([MAX_EPOCH])
@@ -265,24 +269,9 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
     ))
 
 
-    # best_trained_model = Net(best_trial.config["l1"], best_trial.config["l2"])
-    # device = "cpu"
-    # if torch.cuda.is_available():
-    #     device = "cuda:0"
-    #     if gpus_per_trial > 1:
-    #         best_trained_model = nn.DataParallel(best_trained_model)
-    # best_trained_model.to(device)
-
-    # best_checkpoint_dir = best_trial.checkpoint.value
-    # model_state, optimizer_state = torch.load(os.path.join(
-    #     best_checkpoint_dir, "checkpoint"))
-    # best_trained_model.load_state_dict(model_state)
-
-    # test_acc = test_accuracy(best_trained_model, device)
-    # print("Best trial test set accuracy: {}".format(test_acc))
 
 
 if __name__ == '__main__':
     # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
-    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
+    #main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
     run(default_config, save_model_dir='models')
