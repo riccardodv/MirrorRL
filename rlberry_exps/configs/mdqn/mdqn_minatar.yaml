@@ -1,0 +1,25 @@
+agent_class: 'rlberry.agents.torch.dqn.MunchausenDQNAgent'
+init_kwargs:
+    learning_rate: 0.00005
+    optimizer_type: 'ADAM'
+    batch_size: 32
+    target_update_parameter: 8000
+    clip_value_min: -1.0
+    tau: 0.03
+    alpha: 0.9
+    train_interval: 4
+    max_replay_size: 1_000_000
+    eval_interval: 1000
+    max_replay_size:  10_000
+    lambda_ : 0.0
+    chunk_size : 1
+    q_net_constructor: 'rlberry.agents.torch.utils.training.model_factory_from_env'
+    q_net_kwargs:
+      type: 'MultiLayerPerceptron'
+      layer_sizes: [128, 128]
+      reshape: False
+n_fit: 1
+fit_kwargs:
+    fit_budget: 1_000_000
+    
+    

@@ -3,4 +3,5 @@ seed: 23
 train_env: './configs/envs/freeway.yaml'
 eval_env: './configs/envs/freeway.yaml'
 agents:
-    - './configs/ppo/ppo_minatar.yaml' 
+    # - './configs/ppo/ppo_minatar.yaml' 
+    - './configs/mdqn/mdqn_minatar.yaml' 

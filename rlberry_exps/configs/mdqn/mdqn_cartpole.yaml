@@ -1,0 +1,14 @@
+agent_class: 'rlberry.agents.torch.dqn.MunchausenDQNAgent'
+init_kwargs:
+    learning_rate: 0.0007
+    optimizer_type: 'RMS_PROP'
+    batch_size: 200
+    eval_interval: 1000
+    max_replay_size:  10_000
+    lambda_ : 0.0
+    chunk_size : 1
+n_fit: 1
+fit_kwargs:
+    fit_budget: 1_000_000
+    
+    
