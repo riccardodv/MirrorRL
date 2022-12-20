@@ -10,7 +10,6 @@ init_kwargs:
     train_interval: 4
     max_replay_size: 1_000_000
     eval_interval: 1000
-    max_replay_size:  10_000
     lambda_ : 0.0
     chunk_size : 1
     q_net_constructor: 'rlberry.agents.torch.utils.training.model_factory_from_env'
