@@ -76,14 +76,14 @@ class Sampler:
 
     def _rollout(self, render=False, device='cpu'):
         # Generates SARSA type transitions until episode's end
-        obs = self.env.reset()
+        obs, info = self.env.reset()
         obs_tensor = torch.FloatTensor(obs).to(device)
         act = self.policy(obs_tensor)
         done = False
         while not done:
             if render:
                 self.env.render()
-            nobs, rwd, done, terminal = self.env.step(act)
+            nobs, rwd, terminal, done, info = self.env.step(act)
             nobs_tensor = torch.FloatTensor(nobs).to(device)
             nact = self.policy(nobs_tensor)
             yield obs, act, rwd, done, terminal, nobs, nact

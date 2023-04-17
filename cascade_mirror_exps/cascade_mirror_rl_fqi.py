@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
+from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals, create_flatten_environment
 from cascade.nn import CascadeQ
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
@@ -17,24 +17,24 @@ from ray.tune.schedulers import ASHAScheduler
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
-ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
-# ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
+# ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
+ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 
-MAX_EPOCH = 150
+MAX_EPOCH = 300
 
 default_config = {
         "env_id": ENV_ID,
         "max_epoch": MAX_EPOCH,
         "nb_samp_per_iter": 10000,
         "min_grad_steps_per_iter": 10000,
-        "nb_add_neurone_per_iter": 50,
+        "nb_add_neurone_per_iter": 10,
         "batch_size": 64,
         "lr_model": 1e-3,
         "max_replay_memory_size": 10**4,
-        "eta": 1,
+        "eta": 0.5,
         "gamma": 0.99,
         "seed": 0,
-        "nb_inputs": 50 # number of inputs to connect to without the input state dimension
+        "nb_inputs": 100 # number of inputs to connect to without the input state dimension
         # "env_id": ENV_ID,
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
@@ -89,17 +89,21 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     elif env_id == "HopperDiscrete":
         env = HopperDiscrete()
     else:
-        env = EnvWithTerminal(gym.make(env_id))
+        # env = EnvWithTerminal(gym.make(env_id))
+        env = create_flatten_environment(env_id) 
+
+    # obs, info = env.reset()
     
-    if seed is not None:
-        torch.manual_seed(seed)
-        env.env.seed(seed)
+    # if seed is not None:
+    #     torch.manual_seed(seed)
+    #     env.seed(seed)
     
     env_sampler = Sampler(env)
     
 
-    nb_act = env.get_nb_act()
-    dim_s = env.get_dim_obs()
+    # nb_act = env.get_nb_act()
+    nb_act = env.action_space.n
+    dim_s = env.observation_space.shape[0]
     cascade_qfunc = CascadeQ(dim_s, nb_act)
     neurone_non_linearity = torch.nn.Tanh()
 
@@ -190,7 +194,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         optim_alpha = torch.optim.Adam([alpha], lr = 0.01)
 
-        for e in range(500):
+        for e in range(200):
             optim_alpha.zero_grad()
             qsp= cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)  # q-value for the next state and actions taken in the next states
             q_target = rwd + gamma * (nobs_q + alpha * qsp.detach()) * not_terminal - obs_q
