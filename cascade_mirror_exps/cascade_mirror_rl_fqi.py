@@ -17,8 +17,8 @@ from ray.tune.schedulers import ASHAScheduler
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
-ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
-# ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
+# ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
+ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 
 MAX_EPOCH = 150
 
@@ -163,26 +163,37 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         while grad_steps < min_grad_steps_per_iter:
             # train
             train_losses = []
+            projected_reward_losses = []
+            projected_future_losses = []
             with torch.no_grad():
                 qsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)  # q-value for the next state and actions taken in the next states
                 q_target = rwd + gamma * (nobs_q + qsp) * not_terminal - obs_q
 
                 data_loader = DataLoader(TensorDataset(
-                    obs_feat, act, q_target), batch_size=batch_size, shuffle=True, drop_last=True)
+                    obs_feat, act, q_target, obs, nobs, nact, rwd), batch_size=batch_size, shuffle=True, drop_last=True)
 
             optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
                                       *cascade_qfunc.output.parameters()], lr=lr_model)
-            for s, a, tq in data_loader:
+            for s, a, tq, o, no, na, r in data_loader:
                 optim.zero_grad()
                 qs = cascade_qfunc.forward_from_old_cascade_features(s).gather(dim=1, index=a)
                 loss = (qs - tq).pow(2).mean()
                 train_losses.append(loss.item())
                 loss.backward()
                 optim.step()
+                with torch.no_grad():
+                    of = cascade_qfunc.get_features(o)
+                    nof = cascade_qfunc.get_features(no)
+                    pinv = torch.linalg.pinv(of)
+                    pr_phi = of @ pinv
+                    projected_reward_losses.append((r- pr_phi @ r).pow(2).mean().item())
+                    projected_future_losses.append((nof - pr_phi @ nof).pow(2).mean().item())
+                
                 grad_steps += 1
                 if grad_steps >= min_grad_steps_per_iter:
                     break
             print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
+            print(f"\t projected rewards {np.mean(projected_reward_losses)}, projected future features {np.mean(projected_future_losses)}")
 
 
 
@@ -223,6 +234,18 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         with tune.checkpoint_dir(iter) as checkpoint_dir:
             path = os.path.join(checkpoint_dir, "checkpoint")
             torch.save((cascade_qfunc.state_dict(), cascade_qfunc.state_dict()), path)
+        
+
+        # # add new neurone to cascade
+        # with torch.no_grad():
+        #     obs_feat = cascade_qfunc.get_features(obs)
+        #     nobs_feat = cascade_qfunc.get_features(nobs)
+            # print("Device of nobs", nobs.device)
+            # obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
+            # nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact)
+            # obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
+            # old_out = clone_lin_model(cascade_qfunc.output)
+            # proj_feat = 
 
         tune.report(average_reward=np.mean(returns_list[-20:]), 
                     q_error_train= (np.mean(train_losses)), 
