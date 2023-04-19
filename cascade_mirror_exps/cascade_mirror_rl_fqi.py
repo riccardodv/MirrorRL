@@ -181,41 +181,57 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
                 train_losses.append(loss.item())
                 loss.backward()
                 optim.step()
-                with torch.no_grad():
-                    of = cascade_qfunc.get_features(o)
-                    nof = cascade_qfunc.get_features(no)
-                    pinv = torch.linalg.pinv(of)
-                    pr_phi = of @ pinv
-                    projected_reward_losses.append((r- pr_phi @ r).pow(2).mean().item())
-                    projected_future_losses.append((nof - pr_phi @ nof).pow(2).mean().item())
+                # with torch.no_grad():
+                #     of = cascade_qfunc.get_features(o)
+                #     nof = cascade_qfunc.get_features(no)
+                #     pinv = torch.linalg.pinv(of)
+                #     pr_phi = of @ pinv
+                #     projected_reward_losses.append((r- pr_phi @ r).pow(2).mean().item())
+                #     projected_future_losses.append((nof - pr_phi @ nof).pow(2).mean().item())
                 
                 grad_steps += 1
                 if grad_steps >= min_grad_steps_per_iter:
                     break
             print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
-            print(f"\t projected rewards {np.mean(projected_reward_losses)}, projected future features {np.mean(projected_future_losses)}")
+            # print(f"\t projected rewards {np.mean(projected_reward_losses)}, projected future features {np.mean(projected_future_losses)}")
 
 
 
-        
-
-        optim_alpha = torch.optim.Adam([alpha], lr = 0.01)
-
-        for e in range(500):
-            optim_alpha.zero_grad()
-            qsp= cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)  # q-value for the next state and actions taken in the next states
-            q_target = rwd + gamma * (nobs_q + alpha * qsp.detach()) * not_terminal - obs_q
-            qs = cascade_qfunc.forward_from_old_cascade_features(obs_feat).gather(dim=1, index=act)
-            loss = (alpha * qs.detach() - q_target).pow(2).mean()
-            loss.backward()
-            optim_alpha.step()
-            print("\t \t alpha error = {}, alpha = {}".format(loss.item(), alpha.data))
+        #########################################
+        with torch.no_grad():
+            of = cascade_qfunc.get_features(obs)
+            nof = cascade_qfunc.get_features(nobs)
+            pinv = torch.linalg.pinv(of)
+            pr_phi = of @ pinv
+            projected_reward_losses.append((rwd- pr_phi @ rwd).pow(2).mean().item())
+            projected_future_losses.append((nof - pr_phi @ nof).pow(2).mean().item())
+            
+        print(f"\t projected rewards {np.mean(projected_reward_losses)}, projected future features {np.mean(projected_future_losses)}")
+        #########################################
 
 
-        if iter == 0:
-            cascade_qfunc.merge_q(old_out, alpha=1)
-        else:
-            cascade_qfunc.merge_q(old_out, alpha=alpha.data)
+
+
+        # optim_alpha = torch.optim.Adam([alpha], lr = 0.01)
+
+        # for e in range(500):
+        #     optim_alpha.zero_grad()
+        #     qsp= cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)  # q-value for the next state and actions taken in the next states
+        #     q_target = rwd + gamma * (nobs_q + alpha * qsp.detach()) * not_terminal - obs_q
+        #     qs = cascade_qfunc.forward_from_old_cascade_features(obs_feat).gather(dim=1, index=act)
+        #     loss = (alpha * qs.detach() - q_target).pow(2).mean()
+        #     loss.backward()
+        #     optim_alpha.step()
+        #     print("\t \t alpha error = {}, alpha = {}".format(loss.item(), alpha.data))
+
+
+        # if iter == 0:
+        #     cascade_qfunc.merge_q(old_out, alpha=1)
+        # else:
+        #     cascade_qfunc.merge_q(old_out, alpha=alpha.data)
+
+        # comment/uncomment above to switch on/off the alpha optim
+        cascade_qfunc.merge_q(old_out, alpha=1)
 
 
         with torch.no_grad():
