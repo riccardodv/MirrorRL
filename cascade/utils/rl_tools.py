@@ -133,6 +133,14 @@ def softmax_policy(obs, qfunc, eta, squeeze_out=True):
             return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().squeeze(0).cpu().numpy()
         else:
             return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().unsqueeze(1)
+        
+def uniform_random_policy(obs, nb_actions):
+    if obs.ndim < 2:
+        obs = torch.tensor(obs)[None, :]
+    obs_shape = list(obs.shape)
+    obs_shape[-1] = nb_actions
+    m = torch.distributions.Categorical(torch.ones(obs_shape)*1/nb_actions)
+    return m.sample().squeeze(0).cpu().numpy()
 
 
 def get_targets_qvals(q_values_next, rwd, done, discount, lam):
