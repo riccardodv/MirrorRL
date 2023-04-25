@@ -3,9 +3,11 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset 
 from torch.utils.data.sampler import RandomSampler, BatchSampler
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals
-from cascade.nn import CascadeQ
+
+from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals, uniform_random_policy
+from cascade.nn import CascadeQ, CascadeQ2
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
@@ -18,25 +20,25 @@ from ray.tune.schedulers import ASHAScheduler
 # ENV_ID = "Acrobot-v1"
 # ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
-ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
+ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
 MAX_EPOCH = 150
 
 default_config = {
         "env_id": ENV_ID,
         "max_epoch": MAX_EPOCH,
         "nb_samp_per_iter": 10000,
-        "min_grad_steps_per_iter": 10000,
+        "min_grad_steps_per_iter": 5000,
         "nb_add_neurone_per_iter": 10,
         "batch_size": 32,
-        "lr_model": 1e-3,
+        "lr_model":5e-3,
         "max_replay_memory_size": 10**4,
         "target_update_freq": 1000,
-        "replay_start_size": 0,
+        "replay_start_size": 500,
         "eta": 0.5,
         "gamma": 0.99,
         "seed": 0,
         "max_epoch": MAX_EPOCH,
-        "print_every": 1000,
+        "print_every": 100,
         "weight_decay": 1e-3
     }
  
@@ -90,7 +92,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
-    cascade_qfunc = CascadeQ(dim_s, nb_act)
+    cascade_qfunc = CascadeQ2(dim_s, nb_act, init_nb_hidden =nb_add_neurone_per_iter)
     neurone_non_linearity = torch.nn.Tanh()
 
     cascade_qfunc.to(device)
@@ -113,10 +115,19 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
     for iter in range(nb_iter):
 
-        roll = env_sampler.rollouts(lambda x: softmax_policy(
-            x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
+        if iter == 0:
+            roll = env_sampler.rollouts(lambda x: uniform_random_policy(
+                x, nb_act), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
+        else:        
+            roll = env_sampler.rollouts(lambda x: softmax_policy(
+                x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(
             roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
+
+        # roll = env_sampler.rollouts(lambda x: softmax_policy(
+        #     x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
+        # curr_cum_rwd, returns_list, total_ts = update_logging_stats(
+        #     roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
 
         with torch.no_grad():
             if data:
@@ -145,15 +156,26 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             obs_feat = cascade_qfunc.get_features(obs)
             nobs_feat = cascade_qfunc.get_features(nobs)
             print("Device of nobs", nobs.device)
-            nobs_q_all = cascade_qfunc.get_q(nobs)
-            obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
-            nobs_q = nobs_q_all.gather(dim=1, index=nact)
-            obs_old_distrib = torch.distributions.Categorical(
-                logits=eta * cascade_qfunc(obs))
-            nobs_old_distrib = torch.distributions.Categorical(
-                logits=eta * cascade_qfunc(nobs))
-            nobs_v = (nobs_q_all * nobs_old_distrib.probs).sum(1, keepdim=True)
+            # nobs_q_all = cascade_qfunc.get_q(nobs)
+            # obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
+            # nobs_q = nobs_q_all.gather(dim=1, index=nact)
+            # obs_old_distrib = torch.distributions.Categorical(
+            #     logits=eta * cascade_qfunc(obs))
+            # nobs_old_distrib = torch.distributions.Categorical(
+            #     logits=eta * cascade_qfunc(nobs))
+            # nobs_v = (nobs_q_all * nobs_old_distrib.probs).sum(1, keepdim=True)
+            # old_out = clone_lin_model(cascade_qfunc.output)
+
+            if iter == 0:
+                obs_q = torch.zeros((obs.shape[0], 1))
+                nobs_q = torch.zeros((nobs.shape[0], 1))
+                obs_old_distrib = torch.distributions.Categorical(torch.ones((obs.shape[0], 1))*1/nb_act)
+            else:
+                obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
+                nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact)
+                obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
             old_out = clone_lin_model(cascade_qfunc.output)
+
             # q_target = rwd + gamma * nobs_q * not_terminal
 
         # cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nb_add_neurone_per_iter + dim_s,
@@ -170,6 +192,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
                                       *cascade_qfunc.output.parameters()], lr=lr_model, weight_decay=weight_decay)
+        
+        # sched = ReduceLROnPlateau(optim)
 
         # grad_steps = 0
         rs = RandomSampler(range(len(obs_feat)), replacement = True, num_samples = min_grad_steps_per_iter * batch_size)
@@ -184,6 +208,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
                         dim=1, index=nact)  # q-value for the next state and actions taken in the next states
                     q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal - obs_q # do we really need to update Q-target for each epoch????????????
                     dataset = TensorDataset(obs_feat, act, q_target)
+                    print(f'\t \t Target nn is updated')
             s, a, tq = dataset[batch_idx]
             optim.zero_grad()
             newqs = cascade_qfunc.forward_from_old_cascade_features(s)
@@ -192,6 +217,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             train_losses.append(loss.item())
             loss.backward()
             optim.step()
+            # sched.step(loss)
 
             if (grad_steps + 1) % print_every == 0:
                 print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
@@ -202,6 +228,21 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             cascade_qfunc.merge_q(old_out, alpha=1)
         else:
             cascade_qfunc.merge_q(old_out, alpha=0.1)
+
+        projected_reward_losses = []
+        projected_future_losses = []
+        #########################################
+        with torch.no_grad():
+            of = cascade_qfunc.get_features(obs)
+            # nof = cascade_qfunc.get_features(nobs)
+            nq = cascade_qfunc.get_q(nobs)
+            pinv = torch.linalg.pinv(of)
+            pr_phi = of @ pinv
+            projected_reward_losses.append((rwd- pr_phi @ rwd).pow(2).mean().item())
+            projected_future_losses.append((nq  - pr_phi @ nq).pow(2).mean().item())
+            
+        print(f"\t projected rewards {np.mean(projected_reward_losses)}, projected future features {np.mean(projected_future_losses)}")
+        #########################################
 
         with torch.no_grad():
             new_distrib = torch.distributions.Categorical(

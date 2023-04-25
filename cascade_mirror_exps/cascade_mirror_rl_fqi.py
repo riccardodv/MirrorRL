@@ -2,6 +2,7 @@ import gym
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals, uniform_random_policy
 from cascade.nn import CascadeQ, CascadeQ2
@@ -29,7 +30,7 @@ default_config = {
         "min_grad_steps_per_iter": 10000,
         "nb_add_neurone_per_iter": 50,
         "batch_size": 64,
-        "lr_model": 1e-3,
+        "lr_model": 5e-2,
         "max_replay_memory_size": 10**4,
         "eta": 1,
         "gamma": 0.99,
@@ -184,6 +185,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
             optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
                                       *cascade_qfunc.output.parameters()], lr=lr_model)
+            # sched = ReduceLROnPlateau(optim, 'min')
             for s, a, tq, o, no, na, r in data_loader:
                 optim.zero_grad()
                 qs = cascade_qfunc.forward_from_old_cascade_features(s).gather(dim=1, index=a)
@@ -191,6 +193,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
                 train_losses.append(loss.item())
                 loss.backward()
                 optim.step()
+                # sched.step(loss)
                 # with torch.no_grad():
                 #     of = cascade_qfunc.get_features(o)
                 #     nof = cascade_qfunc.get_features(no)
@@ -229,7 +232,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             cascade_qfunc.merge_q(old_out, alpha=alpha.data)
 
         # comment/uncomment above to switch on/off the alpha optim
-        cascade_qfunc.merge_q(old_out, alpha=1)
+        # cascade_qfunc.merge_q(old_out, alpha=1)
 
 
         # weights_q = cascade_qfunc.qfunc.weight.data
