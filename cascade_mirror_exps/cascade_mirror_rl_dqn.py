@@ -169,12 +169,12 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             # old_out = clone_lin_model(cascade_qfunc.output)
 
             if iter == 0:
-                obs_q = torch.zeros((obs.shape[0], 1))
-                nobs_q = torch.zeros((nobs.shape[0], 1))
+                obs_q = torch.zeros((obs.shape[0], 1)).to(device)
+                nobs_q = torch.zeros((nobs.shape[0], 1)).to(device)
                 obs_old_distrib = torch.distributions.Categorical(torch.ones((obs.shape[0], 1))*1/nb_act)
             else:
-                obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
-                nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact)
+                obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act).to(device)
+                nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact).to(device)
                 obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
             old_out = clone_lin_model(cascade_qfunc.output)
 
@@ -301,7 +301,7 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         # parameter_columns=["l1", "l2", "lr", "batch_size"],
         metric_columns=["average_reward", "q_error_train", "kl", "entropy"])
 
-    ray.init()
+    # ray.init()
     result = tune.run(
         run,
         resources_per_trial={"cpu": 1, "gpu": gpus_per_trial},
@@ -310,7 +310,7 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         scheduler=scheduler,
         progress_reporter=reporter,
         verbose = 0)
-    ray.shutdown()
+    # ray.shutdown()
 
     best_trial = result.get_best_trial("average_reward", "max", "last-10-avg")
     print("Best trial config: {}".format(best_trial.config))
