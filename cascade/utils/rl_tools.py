@@ -1,7 +1,6 @@
 import numpy as np
-import warnings
+import warnings, pdb
 import torch
-
 import gym
 from gym.wrappers import FlattenObservation
 
@@ -128,7 +127,7 @@ def update_logging_stats(rwds, dones, curr_cum_rwd, returns_list, total_ts):
 def softmax_policy(obs, qfunc, eta, squeeze_out=True):
     with torch.no_grad():
         if obs.ndim < 2:
-            obs = torch.tensor(obs)[None, :]
+            obs = obs[None, :].clone().detach()
         if squeeze_out:
             return torch.distributions.Categorical(logits=eta * qfunc(obs)).sample().squeeze(0).cpu().numpy()
         else:
@@ -136,7 +135,7 @@ def softmax_policy(obs, qfunc, eta, squeeze_out=True):
         
 def uniform_random_policy(obs, nb_actions):
     if obs.ndim < 2:
-        obs = torch.tensor(obs)[None, :]
+        obs = obs[None, :].clone().detach()
     obs_shape = list(obs.shape)
     obs_shape[-1] = nb_actions
     m = torch.distributions.Categorical(torch.ones(obs_shape)*1/nb_actions)
