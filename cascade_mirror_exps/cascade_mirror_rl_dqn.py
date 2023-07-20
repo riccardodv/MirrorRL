@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset 
 from torch.utils.data.sampler import RandomSampler, BatchSampler
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-
+# import pdb
 
 from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals, uniform_random_policy
 from cascade.nn import CascadeQ, CascadeQ2, CascadeNN
@@ -12,6 +12,8 @@ from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
 from cascade.discrete_envs import PendulumDiscrete, HopperDiscrete
+
+import ray
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
@@ -170,12 +172,12 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             # old_out = clone_lin_model(cascade_qfunc.output)
 
             if iter == 0:
-                obs_q = torch.zeros((obs.shape[0], 1))
-                nobs_q = torch.zeros((nobs.shape[0], 1))
+                obs_q = torch.zeros((obs.shape[0], 1)).to(device)
+                nobs_q = torch.zeros((nobs.shape[0], 1)).to(device)
                 obs_old_distrib = torch.distributions.Categorical(torch.ones((obs.shape[0], 1))*1/nb_act)
             else:
-                obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
-                nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact)
+                obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act).to(device)
+                nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact).to(device)
                 obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
             old_out = clone_lin_model(cascade_qfunc.output)
 
@@ -233,9 +235,9 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         else:
             cascade_qfunc.merge_q(old_out, alpha=0.1)
 
+        #########################################
         projected_reward_losses = []
         projected_future_losses = []
-        #########################################
         with torch.no_grad():
             of = cascade_qfunc.get_features(obs)
             # nof = cascade_qfunc.get_features(nobs)
@@ -243,28 +245,28 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             pinv = torch.linalg.pinv(of)
             pr_phi = of @ pinv
             projected_reward_losses.append((rwd- pr_phi @ rwd).pow(2).mean().item())
-            projected_future_losses.append((nq  - pr_phi @ nq).pow(2).mean().item())
-            
+            projected_future_losses.append((nq  - pr_phi @ nq).pow(2).mean().item())    
         print(f"\t projected rewards {np.mean(projected_reward_losses)}, projected future features {np.mean(projected_future_losses)}")
         #########################################
 
         with torch.no_grad():
             new_distrib = torch.distributions.Categorical(
                 logits=eta * cascade_qfunc(obs))
-            kl = stable_kl_div(obs_old_distrib.probs,
+            kl = stable_kl_div(obs_old_distrib.probs.to(device),
                                new_distrib.probs).mean().item()
-
             normalized_entropy = new_distrib.entropy().mean().item() / np.log(nb_act)
             print(
                 f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}\n')
-        with tune.checkpoint_dir(iter) as checkpoint_dir:
-            path = os.path.join(checkpoint_dir, "checkpoint")
-            torch.save((cascade_qfunc.state_dict(), cascade_qfunc.state_dict()), path)
-
-        tune.report(average_reward=np.mean(returns_list[-20:]), 
-                    q_error_train= (np.mean(train_losses)), 
-                    kl=kl, 
-                    entropy = normalized_entropy)
+        
+        if ray.tune.is_session_enabled():
+            with tune.checkpoint_dir(iter) as checkpoint_dir:
+                path = os.path.join(checkpoint_dir, "checkpoint")
+                torch.save((cascade_qfunc.state_dict(), cascade_qfunc.state_dict()), path)
+            tune.report(average_reward=np.mean(returns_list[-20:]), 
+                        q_error_train= (np.mean(train_losses)), 
+                        kl=kl, 
+                        entropy = normalized_entropy)
+        
     if save_model_dir is not None:
         torch.save(cascade_qfunc, os.path.join(save_model_dir, f'cascade_qfunc_{ENV_ID}.pt'))
     print("Finished Training!")
@@ -274,19 +276,22 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
 
     # config for acrobot
     config = {
+        "env_id" : tune.grid_search([ENV_ID]),
+        "max_epoch": tune.grid_search([MAX_EPOCH]),
         "nb_samp_per_iter": tune.grid_search([10000]),
-        "min_grad_steps_per_iter": tune.grid_search([10000]),
+        "min_grad_steps_per_iter": tune.grid_search([5000]),
         "nb_add_neurone_per_iter": tune.grid_search([10]),
         "batch_size": tune.grid_search([64]),
         "lr_model": tune.grid_search([1e-3]),
-        "max_replay_memory_size": tune.grid_search([10000]),
-        #"eta": tune.loguniform(0.1, 10),
-        "eta": tune.grid_search([0.1]), # the smaller the better, best around 0.1, 0.5
+        "max_replay_memory_size": tune.grid_search([int(1e4)]),
+        "target_update_freq": tune.grid_search([1000]),
+        "replay_start_size": tune.grid_search([500]),
+        "eta": tune.grid_search([0.5]), # the smaller the better, best around 0.1, 0.5
         "gamma": tune.grid_search([0.99]),
         "seed": tune.grid_search([1]),
-        "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
-        "env_id" : tune.grid_search([ENV_ID]), 
-        "max_epoch": tune.grid_search([MAX_EPOCH])
+        "print_every": tune.grid_search([100]),
+        "weight_decay": tune.grid_search([1e-3])
+        # "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
         # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         # "lr": tune.loguniform(1e-4, 1e-1),
         # "batch_size": tune.choice([2, 4, 8, 16])
@@ -303,6 +308,7 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         # parameter_columns=["l1", "l2", "lr", "batch_size"],
         metric_columns=["average_reward", "q_error_train", "kl", "entropy"])
 
+    # ray.init()
     result = tune.run(
         run,
         resources_per_trial={"cpu": 1, "gpu": gpus_per_trial},
@@ -311,6 +317,7 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         scheduler=scheduler,
         progress_reporter=reporter,
         verbose = 0)
+    # ray.shutdown()
 
     best_trial = result.get_best_trial("average_reward", "max", "last-10-avg")
     print("Best trial config: {}".format(best_trial.config))
@@ -329,6 +336,6 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
 
 
 if __name__ == '__main__':
-    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
-    #main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
-    run(default_config, save_model_dir='models')
+    main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 1.)
+    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
+    # run(default_config, save_model_dir='models')

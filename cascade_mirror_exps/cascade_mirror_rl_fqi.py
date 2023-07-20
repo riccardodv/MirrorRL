@@ -153,12 +153,12 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             nobs_feat = cascade_qfunc.get_features(nobs)
             print("Device of nobs", nobs.device)
             if iter == 0:
-                obs_q = torch.zeros((obs.shape[0], 1))
-                nobs_q = torch.zeros((nobs.shape[0], 1))
+                obs_q = torch.zeros((obs.shape[0], 1)).to(device)
+                nobs_q = torch.zeros((nobs.shape[0], 1)).to(device)
                 obs_old_distrib = torch.distributions.Categorical(torch.ones((obs.shape[0], 1))*1/nb_act)
             else:
-                obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
-                nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact)
+                obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act).to(device)
+                nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact).to(device)
                 obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
             old_out = clone_lin_model(cascade_qfunc.output)
 
