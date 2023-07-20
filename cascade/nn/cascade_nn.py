@@ -142,17 +142,61 @@ class CascadeNN(nn.Module):
         return [*self.cascade_neurone_list[-1].parameters()]
 
 
+class TargetCascadeNN2(nn.Module):
+    def __init__(self, dim_input, dim_output, nb_hidden, added_nb_hidden, non_linearity = nn.ReLU()):
+        super().__init__()
+        self.dim_input = dim_input
+        self.dim_output = dim_output
+        self.nb_hidden = nb_hidden + added_nb_hidden
+        self.cascade_neurone_list = []
+        # if added_nb_hidden > 0:
+        #     self.cascade_neurone_list.append(CascadeNeurone(nb_in = dim_input+nb_hidden, nb_out=added_nb_hidden, dim_data_input=dim_input, non_linearity= non_linearity))
+        self.cascade = CascadeNeurone(nb_in = dim_input+nb_hidden, nb_out=added_nb_hidden, dim_data_input=dim_input, non_linearity= non_linearity)
+        self.output = nn.Linear(self.nb_hidden, dim_output)
+        self.output.weight.data[:] = 0.
+        self.output.bias.data[:] = 0.
 
+    
+    def forward(self, x, stack=True):
+        return self.output(self.get_features(x, stack)[..., -self.nb_hidden:])
+
+    def get_features(self, old_feat, stack=True):
+        if stack:
+            return self.cascade(old_feat)
+        else:
+            features = torch.zeros(old_feat.shape[0], self.nb_hidden + old_feat.shape[1])
+            features[:, :old_feat.shape[1]] = old_feat
+            for casc in self.cascade:
+                nb_in = casc.f[0].in_features
+                nb_out = casc.f[0].out_features
+                features[:, nb_in:nb_in+nb_out] = casc(features[:, :nb_in], stack=False)
+            return features
+        
+    def load_weight(self, cascade_neurone, output_l):
+        self.output = clone_lin_model(output_l)
+        self.cascade.f[0].weight = cascade_neurone.f[0].weight.detach().clone()
+        self.cascade.f[0].bias = cascade_neurone.f[0].bias.detach().clone()
+
+    def alpha_sync(self, cascade_neurone, output_l, alpha):
+        assert isinstance(alpha, float)
+        assert 0.0 < alpha <= 1.0
+
+        self.output.weight = alpha*self.output.weight + (1-alpha)*output_l.weight.detach()
+        self.output.bias = alpha*self.output.bias + (1-alpha)*output_l.bias.detach()
+
+        self.cascade.f[0].weight = alpha*self.cascade.f[0].weight + (1-alpha)*cascade_neurone.f[0].weight.detach()
+        self.cascade.f[0].bias = alpha*self.cascade.f[0].bias + (1-alpha)*cascade_neurone.f[0].bias.detach()
+ 
 
 class CascadeNN2(nn.Module):
-    def __init__(self, dim_input, dim_output, init_nb_hidden = 1, **kwargs):
+    def __init__(self, dim_input, dim_output, init_nb_hidden = 1, non_linearity = nn.ReLU(), **kwargs):
         super().__init__()
         self.dim_input = dim_input
         self.dim_output = dim_output
         self.nb_hidden = init_nb_hidden
         self.cascade_neurone_list = []
         if init_nb_hidden > 0:
-            self.cascade_neurone_list.append(CascadeNeurone(nb_in = dim_input, nb_out=init_nb_hidden, dim_data_input=dim_input))
+            self.cascade_neurone_list.append(CascadeNeurone(nb_in = dim_input, nb_out=init_nb_hidden, dim_data_input=dim_input, non_linearity= non_linearity))
         self.cascade = nn.Sequential(*self.cascade_neurone_list)
         self.output = nn.Linear(self.nb_hidden, dim_output)
         self.output.weight.data[:] = 0.

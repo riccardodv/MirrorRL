@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 # import pdb
 
 from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals, uniform_random_policy
-from cascade.nn import CascadeQ, CascadeQ2
+from cascade.nn import CascadeQ, CascadeQ2, CascadeNN
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
@@ -29,12 +29,12 @@ default_config = {
         "env_id": ENV_ID,
         "max_epoch": MAX_EPOCH,
         "nb_samp_per_iter": 10000,
-        "min_grad_steps_per_iter": 5000,
+        "min_grad_steps_per_iter": 50000,
         "nb_add_neurone_per_iter": 10,
         "batch_size": 32,
         "lr_model":5e-3,
         "max_replay_memory_size": 10**4,
-        "target_update_freq": 1000,
+        "target_update_freq": 10000,
         "replay_start_size": 500,
         "eta": 0.5,
         "gamma": 0.99,
@@ -94,8 +94,11 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
-    cascade_qfunc = CascadeQ2(dim_s, nb_act, init_nb_hidden =nb_add_neurone_per_iter)
-    neurone_non_linearity = torch.nn.Tanh()
+    # neurone_non_linearity = torch.nn.SiLU()
+    neurone_non_linearity = torch.nn.ReLU()
+    # neurone_non_linearity = torch.nn.Tanh()
+
+    cascade_qfunc = CascadeQ2(dim_s, nb_act, init_nb_hidden =nb_add_neurone_per_iter, non_linearity = neurone_non_linearity)
 
     cascade_qfunc.to(device)
 
@@ -171,6 +174,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nbInputs, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
         cascade_qfunc.to(device)
+
 
 
         optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
