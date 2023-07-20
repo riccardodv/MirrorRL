@@ -126,11 +126,6 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(
             roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
 
-        # roll = env_sampler.rollouts(lambda x: softmax_policy(
-        #     x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
-        # curr_cum_rwd, returns_list, total_ts = update_logging_stats(
-        #     roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
-
         with torch.no_grad():
             if data:
                 data['nact'] = softmax_policy(data['nobs'].float().to(device), cascade_qfunc, eta, squeeze_out=False)
@@ -150,24 +145,13 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         not_terminal = not_terminal.to(device)
 
 
-        print(
-            f'iter {iter} ntransitions {total_ts} avr_return_last_20 {np.mean(returns_list[-20:])}')
+        print(f'iter {iter} ntransitions {total_ts} avr_return_last_100 {np.mean(returns_list[-100:])}')
 
         # add new neurone to cascade
         with torch.no_grad():
             obs_feat = cascade_qfunc.get_features(obs)
             nobs_feat = cascade_qfunc.get_features(nobs)
             print("Device of nobs", nobs.device)
-            # nobs_q_all = cascade_qfunc.get_q(nobs)
-            # obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act)
-            # nobs_q = nobs_q_all.gather(dim=1, index=nact)
-            # obs_old_distrib = torch.distributions.Categorical(
-            #     logits=eta * cascade_qfunc(obs))
-            # nobs_old_distrib = torch.distributions.Categorical(
-            #     logits=eta * cascade_qfunc(nobs))
-            # nobs_v = (nobs_q_all * nobs_old_distrib.probs).sum(1, keepdim=True)
-            # old_out = clone_lin_model(cascade_qfunc.output)
-
             if iter == 0:
                 obs_q = torch.zeros((obs.shape[0], 1)).to(device)
                 nobs_q = torch.zeros((nobs.shape[0], 1)).to(device)
@@ -178,17 +162,14 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
                 obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
             old_out = clone_lin_model(cascade_qfunc.output)
 
-            # q_target = rwd + gamma * nobs_q * not_terminal
 
-        # cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nb_add_neurone_per_iter + dim_s,
-        #                              n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
+        # specify connectivity to previous hidden neurons
         nbInputs = obs_feat.shape[1]
         if "nb_inputs" in config.keys():
             if config["nb_inputs"] >= dim_s:
                 nbInputs = config["nb_inputs"]
 
         cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nbInputs, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
-        # cascade_qfunc.add_n_neurones(obs_feat, n=nb_add_neurone_per_iter)
         cascade_qfunc.to(device)
 
 
@@ -219,7 +200,6 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             train_losses.append(loss.item())
             loss.backward()
             optim.step()
-            # sched.step(loss)
 
             if (grad_steps + 1) % print_every == 0:
                 print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
@@ -229,9 +209,10 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         if iter == 0:
             cascade_qfunc.merge_q(old_out, alpha=1)
         else:
-            cascade_qfunc.merge_q(old_out, alpha=0.1)
+            cascade_qfunc.merge_q(old_out, alpha=1.) # boosting option
 
-        #########################################
+
+        # monitor the projected reward and future features
         projected_reward_losses = []
         projected_future_losses = []
         with torch.no_grad():
@@ -242,18 +223,17 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             pr_phi = of @ pinv
             projected_reward_losses.append((rwd- pr_phi @ rwd).pow(2).mean().item())
             projected_future_losses.append((nq  - pr_phi @ nq).pow(2).mean().item())    
-        print(f"\t projected rewards {np.mean(projected_reward_losses)}, projected future features {np.mean(projected_future_losses)}")
-        #########################################
-
-        with torch.no_grad():
+            print(f"iter {iter} ntransitions {total_ts} projected rewards {np.mean(projected_reward_losses)} projected future features {np.mean(projected_future_losses)}")
+        # monitor the KL divergence and entropy
             new_distrib = torch.distributions.Categorical(
                 logits=eta * cascade_qfunc(obs))
             kl = stable_kl_div(obs_old_distrib.probs.to(device),
                                new_distrib.probs).mean().item()
             normalized_entropy = new_distrib.entropy().mean().item() / np.log(nb_act)
-            print(
-                f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}\n')
+            print(f"iter {iter} ntransitions {total_ts}  grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}\n")
         
+
+
         if ray.tune.is_session_enabled():
             with tune.checkpoint_dir(iter) as checkpoint_dir:
                 path = os.path.join(checkpoint_dir, "checkpoint")
@@ -275,7 +255,7 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         "env_id" : tune.grid_search([ENV_ID]),
         "max_epoch": tune.grid_search([MAX_EPOCH]),
         "nb_samp_per_iter": tune.grid_search([10000]),
-        "min_grad_steps_per_iter": tune.grid_search([5000]),
+        "min_grad_steps_per_iter": tune.grid_search([500]),
         "nb_add_neurone_per_iter": tune.grid_search([10]),
         "batch_size": tune.grid_search([64]),
         "lr_model": tune.grid_search([1e-3]),
