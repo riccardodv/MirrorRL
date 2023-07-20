@@ -30,7 +30,7 @@ default_config = {
         "min_grad_steps_per_iter": 10000,
         "nb_add_neurone_per_iter": 50,
         "batch_size": 64,
-        "lr_model": 5e-2,
+        "lr_model": 1e-3,
         "max_replay_memory_size": 10**4,
         "eta": 1,
         "gamma": 0.99,
@@ -101,8 +101,9 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
-    cascade_qfunc = CascadeQ2(dim_s, nb_act, init_nb_hidden = 0)
-    neurone_non_linearity = torch.nn.Tanh()
+    neurone_non_linearity = torch.nn.ReLU()
+    # neurone_non_linearity = torch.nn.SiLU()
+    cascade_qfunc = CascadeQ2(dim_s, nb_act, init_nb_hidden = 0, non_linearity = neurone_non_linearity)
 
     cascade_qfunc.to(device)
 
