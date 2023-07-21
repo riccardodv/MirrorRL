@@ -29,19 +29,20 @@ default_config = {
         "env_id": ENV_ID,
         "max_epoch": MAX_EPOCH,
         "nb_samp_per_iter": 10000,
-        "min_grad_steps_per_iter": 5000,
+        "min_grad_steps_per_iter": 10000,
         "nb_add_neurone_per_iter": 10,
-        "batch_size": 32,
+        "batch_size": 64,
         "lr_model":5e-3,
         "max_replay_memory_size": 10**4,
-        "target_update_freq": 1000,
+        "target_update_freq": 100,
         "replay_start_size": 500,
         "eta": 0.5,
         "gamma": 0.99,
         "seed": 0,
         "max_epoch": MAX_EPOCH,
         "print_every": 100,
-        "weight_decay": 1e-3
+        "weight_decay": 1e-3,
+        "lamda": 0.1
     }
  
 
@@ -63,6 +64,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     target_update_freq = config["target_update_freq"]
     print_every = config["print_every"]
     weight_decay = config["weight_decay"]
+    lamda = config["lamda"]
+
     if "seed" in config.keys():
         seed = config["seed"]
     else:
@@ -149,8 +152,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         # add new neurone to cascade
         with torch.no_grad():
-            obs_feat = cascade_qfunc.get_features(obs)
-            nobs_feat = cascade_qfunc.get_features(nobs)
+            obs_feat_data = cascade_qfunc.get_features(obs)
+            nobs_feat_data = cascade_qfunc.get_features(nobs)
             print("Device of nobs", nobs.device)
             if iter == 0:
                 obs_q = torch.zeros((obs.shape[0], 1)).to(device)
@@ -164,45 +167,57 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
 
         # specify connectivity to previous hidden neurons
-        nbInputs = obs_feat.shape[1]
+        nbInputs = obs_feat_data.shape[1]
         if "nb_inputs" in config.keys():
             if config["nb_inputs"] >= dim_s:
                 nbInputs = config["nb_inputs"]
 
-        cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nbInputs, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
+        cascade_qfunc.add_n_neurones(obs_feat_data, nb_inputs=nbInputs, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
         cascade_qfunc.to(device)
-
 
         optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
                                       *cascade_qfunc.output.parameters()], lr=lr_model, weight_decay=weight_decay)
         
-        # sched = ReduceLROnPlateau(optim)
-
-        # grad_steps = 0
-        rs = RandomSampler(range(len(obs_feat)), replacement = True, num_samples = min_grad_steps_per_iter * batch_size)
+        rs = RandomSampler(range(len(obs_feat_data)), replacement = True, num_samples = min_grad_steps_per_iter * batch_size)
         bs = BatchSampler(rs, batch_size, drop_last = False)
         train_losses = []
+        train_regularizer = []
         for grad_steps, batch_idx in enumerate(bs):
-            # for grad_steps in range(min_grad_steps_per_iter):
             if grad_steps % target_update_freq == 0:
-                # train_losses = []
                 with torch.no_grad():
-                    newqsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(
-                        dim=1, index=nact)  # q-value for the next state and actions taken in the next states
-                    q_target = rwd + gamma * (nobs_q + newqsp) * not_terminal - obs_q # do we really need to update Q-target for each epoch????????????
-                    dataset = TensorDataset(obs_feat, act, q_target)
+                    nobs_delta = cascade_qfunc.forward_from_old_cascade_features(nobs_feat_data).gather(dim=1, index=nact) 
+                    delta_target_dataset = rwd + gamma * (nobs_q + nobs_delta) * not_terminal - obs_q 
+                    dataset = TensorDataset(obs_feat_data, act, delta_target_dataset, rwd, nobs_feat_data, nact, not_terminal, obs_q, nobs_q)
                     print(f'\t \t Target nn is updated')
-            s, a, tq = dataset[batch_idx]
+
+
+            obs_feat, a, delta_target, r, nobs_feat, ap, nt, q, nq  = dataset[batch_idx]
             optim.zero_grad()
-            newqs = cascade_qfunc.forward_from_old_cascade_features(s)
-            qs = newqs.gather(dim=1, index=a)
-            loss = (qs - tq).pow(2).mean()
-            train_losses.append(loss.item())
-            loss.backward()
+
+            obs_feat_delta = cascade_qfunc.get_features_from_old_cascade_features_cropped(obs_feat)
+            nobs_feat_delta = cascade_qfunc.get_features_from_old_cascade_features_cropped(nobs_feat) 
+
+            delta_sa = cascade_qfunc.output(obs_feat_delta)
+            delta_s = delta_sa.gather(dim=1, index=a)
+            
+            cascade_qfunc.output.weight.requires_grad = False
+            cascade_qfunc.output.bias.requires_grad = False
+            delta_sa_old = cascade_qfunc.output(nobs_feat_delta)
+            delta_s_old = delta_sa_old.gather(dim=1, index=ap)
+            cascade_qfunc.output.weight.requires_grad = True
+            cascade_qfunc.output.bias.requires_grad = True
+
+            loss1 = (delta_s - delta_target).pow(2).mean()
+            loss2 = (delta_s - (r + gamma * (nq + delta_s_old) *nt - q )).pow(2).mean() 
+
+
+            train_losses.append(loss1.item())
+            train_regularizer.append(loss2.item())
+            (loss1+ lamda * loss2).backward()
             optim.step()
 
             if (grad_steps + 1) % print_every == 0:
-                print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
+                print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)} regularizer_error {np.mean(train_regularizer)}')
             
  
 
@@ -312,6 +327,6 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
 
 
 if __name__ == '__main__':
-    main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 1.)
+    # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 1.)
     # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
-    # run(default_config, save_model_dir='models')
+    run(default_config, save_model_dir='models') # for debugging
