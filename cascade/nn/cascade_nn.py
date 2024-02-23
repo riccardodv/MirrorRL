@@ -254,6 +254,15 @@ class CascadeNN2(nn.Module):
     def get_features_from_old_cascade_features_cropped(self, feat):
         """Get final feature from the last cascade neurone, but only the ones that are not the input features"""
         return self.get_features_from_old_cascade_features(feat)[..., -self.nb_hidden:]
+    
+    def forward_from_features_without_grad(self, feat):
+        self.output.weight.requires_grad = False
+        self.output.bias.requires_grad = False
+        res = self.output(feat)
+        self.output.weight.requires_grad = True
+        self.output.bias.requires_grad = True
+        return res
+
 
     def get_features_from_old_cascade_features(self, feat, stack=True):
         return self.cascade_neurone_list[-1](feat, stack=stack)

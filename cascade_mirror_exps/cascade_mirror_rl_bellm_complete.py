@@ -34,7 +34,7 @@ default_config = {
         "batch_size": 64,
         "lr_model":5e-3,
         "max_replay_memory_size": 10**4,
-        "target_update_freq": 100,
+        "target_update_freq": 10,
         "replay_start_size": 500,
         "eta": 0.5,
         "gamma": 0.99,
@@ -190,7 +190,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
                     nobs_delta = cascade_qfunc.forward_from_old_cascade_features(nobs_feat_data).gather(dim=1, index=nact) 
                     delta_target_dataset = rwd + gamma * (nobs_q + nobs_delta) * not_terminal - obs_q 
                     dataset = TensorDataset(obs_feat_data, act, delta_target_dataset, rwd, nobs_feat_data, nact, not_terminal, obs_q, nobs_q)
-                    print(f'\t \t Target nn is updated')
+                    # print(f'\t \t Target nn is updated')
 
 
             obs_feat, a, delta_target, r, nobs_feat, ap, nt, q, nq  = dataset[batch_idx]
@@ -202,12 +202,12 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             delta_sa = cascade_qfunc.output(obs_feat_delta)
             delta_s = delta_sa.gather(dim=1, index=a)
             
-            cascade_qfunc.output.weight.requires_grad = False
-            cascade_qfunc.output.bias.requires_grad = False
-            delta_sa_old = cascade_qfunc.output(nobs_feat_delta)
+            # cascade_qfunc.output.weight.requires_grad = False
+            # cascade_qfunc.output.bias.requires_grad = False
+            delta_sa_old = cascade_qfunc.forward_from_features_without_grad(nobs_feat_delta)
             delta_s_old = delta_sa_old.gather(dim=1, index=ap)
-            cascade_qfunc.output.weight.requires_grad = True
-            cascade_qfunc.output.bias.requires_grad = True
+            # cascade_qfunc.output.weight.requires_grad = True
+            # cascade_qfunc.output.bias.requires_grad = True
 
             loss1 = (delta_s - delta_target).pow(2).mean()
             loss2 = (delta_s - (r + gamma * (nq + delta_s_old) *nt - q )).pow(2).mean() 
