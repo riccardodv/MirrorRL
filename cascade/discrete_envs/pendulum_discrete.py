@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 import warnings
 
@@ -39,4 +39,4 @@ class PendulumDiscrete:
         return self.env.observation_space.shape[0]
 
     def seed(self, seed):
-        self.env.seed(seed)
+        self.env.reset(seed = seed)

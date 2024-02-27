@@ -106,7 +106,9 @@ class CascadeNN(nn.Module):
                 features[:, nb_in:nb_in+nb_out] = casc(features[:, :nb_in], stack=False)
             return features
 
-    def add_n_neurones(self, all_features, nb_inputs, n_neurones=1, non_linearity=nn.ReLU(), init_from_old=False):
+    def add_n_neurones(self, all_features, nb_inputs = None, n_neurones=1, non_linearity=nn.ReLU(), init_from_old=False):
+        if nb_inputs is None:
+            nb_inputs = all_features.shape[1]
         assert nb_inputs >= self.dim_input, f'nb_inputs must at least be larger than data dimensionality {self.dim_input}'
         nb_inputs = min(nb_inputs, all_features.shape[1])
         new_neurone = CascadeNeurone(nb_inputs, nb_out=n_neurones, dim_data_input=self.dim_input, non_linearity=non_linearity)

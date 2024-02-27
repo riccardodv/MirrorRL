@@ -1,13 +1,14 @@
+from re import S
 import numpy as np
 import torch
 from cascade.utils import Sampler, EnvWithTerminal
-import gym
+import gymnasium as gym
 from cascade.discrete_envs import PendulumDiscrete
 import matplotlib.pyplot as plt
-from cascade.nn import CascadeNN
+from cascade.nn import CascadeNN, CascadeNNBN
 from torch.utils.data import DataLoader, TensorDataset
 from cascade.utils import lstd_q
-
+import os
 
 def rwds_finished_rollouts(samples):
     returns = []
@@ -60,15 +61,22 @@ class MLP(torch.nn.Module):
 
 env_name = ['pendulum', 'acrobot'][0]
 if env_name == 'pendulum':
-    pol = torch.load('models/cascade_qfunc_DiscretePendulum_iter15.pt')
+    load_path = os.path.dirname(__file__)
+    load_path = os.path.join(load_path, "models", "cascade_qfunc_DiscretePendulum_iter15.pt")
+    pol = torch.load(load_path)
     env = PendulumDiscrete(horizon=1200)
 elif env_name == 'acrobot':
-    pol = torch.load('models/cascade_qfunc_Acrobot-v1_iter15.pt')
+    load_path = os.path.dirname(__file__)
+    load_path = os.path.join(load_path, "models", "cascade_qfunc_Acrobot-v1_iter15.pt")
+    pol = torch.load(load_path)
     env = EnvWithTerminal(gym.make('Acrobot-v1'))
 
 env.seed(0)
+np.random.seed(0)
+torch.manual_seed(0)
+torch.set_num_threads(3)
 neurone_per_iter = 10
-nb_iter = 100
+nb_iter = 50
 print('nb params cascade at end of training:', nb_params_cascade(env.get_dim_obs(), nb_iter, neurone_per_iter, env.get_nb_act()))
 print('nb params cascade v2 at end of training:', nb_params_cascade_v2(env.get_dim_obs(), nb_iter, neurone_per_iter, env.get_nb_act()))
 
@@ -95,8 +103,8 @@ else:
     rolls_learn = env_sampler.rollouts(policy=lambda x: deterministic_policy(x, pol), min_trans=nb_samp, max_trans=np.inf, device=device)
     true_q = compute_mc_returns(rolls_learn, gamma)
 
-non_linearity = torch.nn.Tanh()
-learn_mode = ['fqi', 'lstd', 'mc', 'mc_mlp', "lstd_random"][0]
+non_linearity = torch.nn.ReLU()
+learn_mode = ['fqi_bn', 'fqi', 'lstd', 'mc', 'mc_mlp', "lstd_random"][0]
 # rolls_test = env_sampler.rollouts(policy=lambda x: deterministic_policy(x, pol),
 #                              min_trans=nb_samp, max_trans=nb_samp, device=device)
 
@@ -136,13 +144,14 @@ if learn_mode == 'mc_mlp':
     optim = torch.optim.Adam(qfunc.parameters(), lr=lr)
     data_loader = DataLoader(TensorDataset(obs, act, true_q), batch_size=batch_size, shuffle=True, drop_last=True)
     print('nb params NN', sum([a.numel() for a in qfunc.parameters()]))
+elif learn_mode == 'fqi_bn':
+    qfunc = CascadeNNBN(env.get_dim_obs(), env.get_nb_act())
 else:
     qfunc = CascadeNN(env.get_dim_obs(), env.get_nb_act())
 
 epoch_per_iter = 30
 loss_fct = torch.nn.MSELoss()
 msbes_train = []
-msbes_during_train = []
 mse_train = []
 
 msbes_test = []
@@ -160,8 +169,14 @@ for it in range(nb_iter):
             e_o = e_so.mean(dim=0)
             e_o_std = e_so.std(dim=0)
 
+    if learn_mode == 'fqi_bn':
+        qfunc.train(False)
+        with torch.no_grad():
+            obs_features = qfunc.get_features(obs)
+            nobs_features = qfunc.get_features(nobs)
+        qfunc.add_n_neurones(neurone_per_iter)
 
-    if not learn_mode == 'mc_mlp':
+    elif not learn_mode == 'mc_mlp':
         # computing Q target
         with torch.no_grad():
             obs_features = qfunc.get_features(obs)
@@ -236,10 +251,8 @@ for it in range(nb_iter):
             for o, a, qt in data_loader:
                 optim.zero_grad()
                 q = qfunc.forward_from_old_cascade_features(o).gather(dim=1, index=a)
-                loss_fqi = loss_fct(q, qt)
-                loss_fqi.backward()
+                loss_fct(q, qt).backward()
                 optim.step()
-            msbes_during_train.append(loss_fqi.item())
         
         # logging
         with torch.no_grad():
@@ -264,6 +277,46 @@ for it in range(nb_iter):
             nphis = qfunc.get_features(test_nobs)
             qtarg = test_rwd + gamma * (1 - test_ter) * qfunc.output(nphis).gather(dim=1, index=test_nact)
             qvals = qfunc.output(phis).gather(dim=1, index=test_act)
+            msbes_test.append(loss_fct(qvals, qtarg).item())
+            mse_test.append(loss_fct(qvals, true_q_test).item())
+            print(f'TEST: \t iter {it}: msbe {msbes_test[-1]:5.3f}, mse to q* {mse_test[-1]:5.3f}')
+
+    elif learn_mode == 'fqi_bn':
+        data_loader = DataLoader(TensorDataset(obs_features, act, rwd, ter, nobs_features, nact),
+                                 batch_size=batch_size, shuffle=True, drop_last=True)
+        optim = torch.optim.Adam(qfunc.parameters(), lr=lr)
+        qfunc.train(True)
+        for e in range(epoch_per_iter):
+            for o, a, r, t, no, na in data_loader:
+                optim.zero_grad()
+                q_all = qfunc.forward_from_frozen_features(torch.cat([o, no], dim=0))
+                q = q_all[:len(o), :].gather(dim=1, index=a)
+                qnext = q_all[len(o):, :].gather(dim=1, index=na).detach()
+                targ = r + gamma * (1 - t) * qnext
+                loss_fct(q, targ).backward()
+                optim.step()
+
+        # logging
+        with torch.no_grad():
+            qfunc.train(False)
+            qtarg = rwd + gamma * (1 - ter) * qfunc(nobs).gather(dim=1, index=nact)
+            qvals = qfunc(obs).gather(dim=1, index=act)
+            msbes_train.append(loss_fct(qvals, qtarg).item())
+            mse_train.append(loss_fct(qvals, true_q).item())
+            print(f'iter {it}: msbe {msbes_train[-1]:5.3f}, mse to q* {mse_train[-1]:5.3f}')
+
+        # testing
+        with torch.no_grad():
+            qfunc.train(False)
+            test_obs = rolls_learn_test["obs"]
+            test_act = rolls_learn_test["act"].long()
+            test_nobs = rolls_learn_test["nobs"]
+            test_nact = rolls_learn_test["nact"].long()
+            test_rwd = rolls_learn_test["rwd"]
+            test_ter = rolls_learn_test["terminal"]
+
+            qtarg = test_rwd + gamma * (1 - test_ter) * qfunc(test_nobs).gather(dim=1, index=test_nact)
+            qvals = qfunc(test_obs).gather(dim=1, index=test_act)
             msbes_test.append(loss_fct(qvals, qtarg).item())
             mse_test.append(loss_fct(qvals, true_q_test).item())
             print(f'TEST: \t iter {it}: msbe {msbes_test[-1]:5.3f}, mse to q* {mse_test[-1]:5.3f}')
@@ -312,8 +365,6 @@ plt.show()
 msbes_train = np.asarray(msbes_train)
 
 
-
 np.save(f'errors_{env_name}_{learn_mode}.npy', {'msbe': msbes_train, 'mse': mse_train})
-np.save(f"during_train_{env_name}_{learn_mode}.npy", {'msbe': msbes_during_train})
 
 np.save(f"test_errors_{env_name}_{learn_mode}.npy", {'msbe': msbes_test, 'mse': mse_test})

@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals, uniform_random_policy
-from cascade.nn import CascadeQ, CascadeQ2
+from cascade.nn import CascadeQ, CascadeQ2, CascadeQBN
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
@@ -16,12 +16,12 @@ from ray.tune.schedulers import ASHAScheduler
 
 # ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
-ENV_ID = "DiscretePendulum"
+# ENV_ID = "DiscretePendulum"
 # ENV_ID = "HopperDiscrete"
-# ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
+ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
 # ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 
-MAX_EPOCH = 15
+MAX_EPOCH = 150
 
 default_config = {
         "env_id": ENV_ID,
@@ -45,17 +45,6 @@ default_config = {
 
 
 
-# def run(env_id='CartPole-v1',
-#          nb_iter=100,
-#          nb_samp_per_iter=10000,
-#          min_grad_steps_per_iter=20000,
-#          nb_add_neurone_per_iter=10,
-#          batch_size=64,
-#          lr_model=1e-3,
-#          max_replay_memory_size=10000,
-#          eta=.1,
-#          gamma = .99
-#          ):
 
 def run(config, checkpoint_dir=None, save_model_dir=None):
 
@@ -95,6 +84,8 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     if seed is not None:
         torch.manual_seed(seed)
         env.seed(seed)
+        np.random.seed(seed)
+    torch.set_num_threads(3)
     
     env_sampler = Sampler(env)
     
@@ -103,39 +94,28 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     dim_s = env.get_dim_obs()
     neurone_non_linearity = torch.nn.ReLU()
     # neurone_non_linearity = torch.nn.SiLU()
-    cascade_qfunc = CascadeQ2(dim_s, nb_act, init_nb_hidden = 0, non_linearity = neurone_non_linearity)
 
+    cascade_qfunc = CascadeQBN(dim_s, nb_act)
     cascade_qfunc.to(device)
 
-    #print("\n\n\n DATA initially \n\n\n", [p for p in cascade_qfunc.parameters()], "\n\n\n")
-    data = {}
     total_ts = 0
     curr_cum_rwd = 0
     returns_list = []
-    alpha = torch.nn.Parameter(torch.tensor(1.0))
 
     for iter in range(nb_iter):
 
-        #TODO propose an alternative strategy for the first iter
-        if iter == 0:
-            roll = env_sampler.rollouts(lambda x: uniform_random_policy(
-                x, nb_act), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
-        else:        
-            roll = env_sampler.rollouts(lambda x: softmax_policy(
-                x, cascade_qfunc, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
+        cascade_qfunc.train(False)     
+        roll = env_sampler.rollouts(lambda x: softmax_policy(
+                x, cascade_qfunc.sumQ, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(
             roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
 
-        with torch.no_grad():
-            if data:
-                data['nact'] = softmax_policy(data['nobs'].float().to(device), cascade_qfunc, eta, squeeze_out=False)
-                #data['nact'] = softmax_policy(torch.FloatTensor(data['nobs']).to(device), cascade_qfunc, eta, squeeze_out=False)
 
-        merge_data_(data, roll, max_replay_memory_size)
 
-        obs, act, rwd, nobs, nact, not_terminal = data['obs'], data['act'].long(), \
-            data['rwd'], data['nobs'], data['nact'].long(),\
-            1 - data['terminal'].float()
+
+        obs, act, rwd, nobs, nact, not_terminal = roll['obs'], roll['act'].long(), \
+            roll['rwd'], roll['nobs'], roll['nact'].long(),\
+            1 - roll['terminal'].float()
 
         obs = obs.to(device)
         act = act.to(device)
@@ -148,120 +128,68 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         print(f'iter {iter} ntransitions {total_ts} avr_return_last_20 {np.mean(returns_list[-20:])}')
 
         # add new neurone to cascade
+        cascade_qfunc.train(False)
         with torch.no_grad():
             obs_feat = cascade_qfunc.get_features(obs)
             nobs_feat = cascade_qfunc.get_features(nobs)
             print("Device of nobs", nobs.device)
-            if iter == 0:
-                obs_q = torch.zeros((obs.shape[0], 1)).to(device)
-                nobs_q = torch.zeros((nobs.shape[0], 1)).to(device)
-                obs_old_distrib = torch.distributions.Categorical(torch.ones((obs.shape[0], 1))*1/nb_act)
-            else:
-                obs_q = cascade_qfunc.get_q(obs).gather(dim=1, index=act).to(device)
-                nobs_q = cascade_qfunc.get_q(nobs).gather(dim=1, index=nact).to(device)
-                obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc(obs))
-            old_out = clone_lin_model(cascade_qfunc.output)
 
-        # specify connectivity to previous hidden neurons
-        nbInputs = obs_feat.shape[1]
-        if "nb_inputs" in config.keys():
-            if config["nb_inputs"] >= 0:
-                nbInputs = config["nb_inputs"]
-                nbInputs += dim_s
+        obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc.sumQ(obs))
 
-        cascade_qfunc.add_n_neurones(obs_feat, nb_inputs=nbInputs, n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
+
+        cascade_qfunc.add_n_neurones(n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
         cascade_qfunc.to(device)
+        cascade_qfunc.train(True)
+
+
+        data_loader = DataLoader(TensorDataset(obs_feat, act, rwd, not_terminal, nobs_feat, nact),
+                                batch_size=batch_size, shuffle=True, drop_last=True)
+        optim = torch.optim.Adam(cascade_qfunc.parameters(), lr=lr_model)
+        # cascade_qfunc.train(True)
         grad_steps = 0
         while grad_steps < min_grad_steps_per_iter:
             # train
+
             train_losses = []
-            projected_reward_losses = []
-            projected_future_losses = []
-            with torch.no_grad():
-                qsp = cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)  # q-value for the next state and actions taken in the next states
-                q_target = rwd + gamma * (nobs_q + qsp) * not_terminal - obs_q
 
-                data_loader = DataLoader(TensorDataset(
-                    obs_feat, act, q_target, obs, nobs, nact, rwd), batch_size=batch_size, shuffle=True, drop_last=True)
-
-            optim = torch.optim.Adam([*cascade_qfunc.cascade_neurone_list[-1].parameters(),
-                                      *cascade_qfunc.output.parameters()], lr=lr_model)
             # sched = ReduceLROnPlateau(optim, 'min')
-            for s, a, tq, o, no, na, r in data_loader:
+            for o, a, r, nt, no, na in data_loader:
                 optim.zero_grad()
-                qs = cascade_qfunc.forward_from_old_cascade_features(s).gather(dim=1, index=a)
-                loss = (qs - tq).pow(2).mean()
+                q_all = cascade_qfunc.forward_from_frozen_features(torch.cat([o, no], dim=0))
+                q = q_all[:len(o), :].gather(dim=1, index=a)
+                qnext = q_all[len(o):, :].gather(dim=1, index=na).detach()
+                targ = r + gamma * nt * qnext
+                # loss_fct(q, targ).backward()
+                loss = (q-targ).pow(2).mean()
                 train_losses.append(loss.item())
                 loss.backward()
                 optim.step()
-                # sched.step(loss)
-                # with torch.no_grad():
-                #     of = cascade_qfunc.get_features(o)
-                #     nof = cascade_qfunc.get_features(no)
-                #     pinv = torch.linalg.pinv(of)
-                #     pr_phi = of @ pinv
-                #     projected_reward_losses.append((r- pr_phi @ r).pow(2).mean().item())
-                #     projected_future_losses.append((nof - pr_phi @ nof).pow(2).mean().item())
-                
+
                 grad_steps += 1
                 if grad_steps >= min_grad_steps_per_iter:
                     break
             print(f'\t grad_steps {grad_steps} q_error_train {np.mean(train_losses)}')
-            # print(f"\t projected rewards {np.mean(projected_reward_losses)}, projected future features {np.mean(projected_future_losses)}")
 
 
 
 
 
-
-        optim_alpha = torch.optim.Adam([alpha], lr = 0.01)
-
-        for e in range(500):
-            optim_alpha.zero_grad()
-            qsp= cascade_qfunc.forward_from_old_cascade_features(nobs_feat).gather(dim=1, index=nact)  # q-value for the next state and actions taken in the next states
-            q_target = rwd + gamma * (nobs_q + alpha * qsp.detach()) * not_terminal - obs_q
-            qs = cascade_qfunc.forward_from_old_cascade_features(obs_feat).gather(dim=1, index=act)
-            loss = (alpha * qs.detach() - q_target).pow(2).mean()
-            loss.backward()
-            optim_alpha.step()
-            print("\t \t alpha error = {}, alpha = {}".format(loss.item(), alpha.data))
-
-
-        if iter == 0:
-            cascade_qfunc.merge_q(old_out, alpha=1)
-        else:
-            cascade_qfunc.merge_q(old_out, alpha=alpha.data)
+        cascade_qfunc.merge_q()
 
         # comment/uncomment above to switch on/off the alpha optim
         # cascade_qfunc.merge_q(old_out, alpha=1)
 
 
-        # weights_q = cascade_qfunc.qfunc.weight.data
-        # bias_q = cascade_qfunc.qfunc.bias.data
-        #########################################
-        with torch.no_grad():
-            of = cascade_qfunc.get_features(obs)
-            # nof = cascade_qfunc.get_features(nobs)
-            nq = cascade_qfunc.get_q(nobs)
-            pinv = torch.linalg.pinv(of)
-            pr_phi = of @ pinv
-            projected_reward_losses.append((rwd- pr_phi @ rwd).pow(2).mean().item())
-            projected_future_losses.append((nq  - pr_phi @ nq).pow(2).mean().item())
-            
-        print(f"\t projected rewards {np.mean(projected_reward_losses)}, projected future features {np.mean(projected_future_losses)}")
-        #########################################
 
-
+        #logging
         with torch.no_grad():
+            cascade_qfunc.train(False)
             new_distrib = torch.distributions.Categorical(
-                logits=eta * cascade_qfunc(obs))
-            # kl = torch.distributions.kl_divergence(obs_old_distrib, new_distrib).mean().item()
+                logits=eta * cascade_qfunc.sumQ(obs))
+
             kl = stable_kl_div(obs_old_distrib.probs,
                                new_distrib.probs).mean().item()
-            # if kl > 1e30:
-            #     print("KL is too large!")
-            #     print("obs_old_distrib.probs", obs_old_distrib.probs)
-            #     print("new_distrib", new_distrib.probs)
+
             normalized_entropy = new_distrib.entropy().mean().item() / np.log(nb_act)
             print(
                 f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}\n')
@@ -276,8 +204,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
                     kl=kl, 
                     entropy = normalized_entropy)
     if save_model_dir is not None:
-        os.makedirs(save_model_dir, exist_ok=True)
-        torch.save(cascade_qfunc, os.path.join(save_model_dir, f'cascade_qfunc_{ENV_ID}.pt'))
+        torch.save(cascade_qfunc, os.path.join(save_model_dir, f'cascade_qfuncBN_{ENV_ID}.pt'))
     print("Finished Training!")
 
 

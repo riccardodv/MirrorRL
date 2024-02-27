@@ -10,3 +10,6 @@ build/
 *.png
 *.pyc
 .DS_Store
+*.is_checkpoint
+*checkpoint
+*.ipynb

@@ -8,27 +8,24 @@ from torch.utils.data import DataLoader, TensorDataset
 from cascade.nn import CascadeNN, CascadeQ
 from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, clone_lin_model
 
-from cascade.discrete_envs import PendulumDiscrete
-
 
 
 def main():
     # env_id = 'MountainCar-v0'
-    # env_id = 'CartPole-v1'
+    env_id = 'CartPole-v1'
     # env_id = 'Acrobot-v1'
     # env_id = 'LunarLander-v2'
     torch.set_num_threads(1)
 
-    # print('learning on', env_id)
-    # env = EnvWithTerminal(gym.make(env_id))
-    env = PendulumDiscrete()
+    print('learning on', env_id)
+    env = EnvWithTerminal(gym.make(env_id))
     env_sampler = Sampler(env)
     gamma = .99
 
     nb_act = env.get_nb_act()
     dim_s = env.get_dim_obs()
     cascade_qfunc = CascadeQ(dim_s, nb_act)
-    nb_iter = 15
+    nb_iter = 1
     nb_samp_per_iter = 10000
     min_grad_steps_per_iter = 10000
     nb_add_neurone_per_iter = 10
@@ -48,8 +45,8 @@ def main():
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
         merge_data_(data, roll, max_replay_memory_size)
 
-        obs, act, rwd, nobs, nact, not_terminal = torch.FloatTensor(data['obs']), torch.tensor(data['act'], dtype=torch.long), \
-                              torch.FloatTensor(data['rwd']), torch.FloatTensor(data['nobs']), torch.tensor(data['nact'], dtype= torch.long),\
+        obs, act, rwd, nobs, nact, not_terminal = torch.FloatTensor(data['obs']), torch.LongTensor(data['act']), \
+                              torch.FloatTensor(data['rwd']), torch.FloatTensor(data['nobs']), torch.LongTensor(data['nact']),\
                                         1 - torch.FloatTensor(data['terminal'])
 
         print(f'iter {iter} ntransitions {total_ts} avr_return_last_20 {np.mean(returns_list[-20:])}')
@@ -95,8 +92,6 @@ def main():
             kl = torch.distributions.kl_divergence(obs_old_distrib, new_distrib).mean().item()
             normalized_entropy = new_distrib.entropy().mean().item() / np.log(nb_act)
             print(f'grad_steps {grad_steps} q_error_train last epoch {np.mean(train_losses)} kl {kl} entropy (in (0, 1)) {normalized_entropy}')
-
-    torch.save(cascade_qfunc, f"cascade_qfunc_DiscretePendulum_iter_{iter+1}.pth")
 
 
 if __name__ == '__main__':

@@ -1,5 +1,24 @@
 from .cascade_nn import CascadeNN, CascadeNN2
+from .cascade_nnbn import CascadeNNBN
 from cascade.utils import clone_lin_model
+
+
+class CascadeQBN(CascadeNNBN):
+    def __init__(self, dim_input, dim_output, **kwargs):
+        super().__init__(dim_input, dim_output, **kwargs)
+        self.sumQ = clone_lin_model(self.output)
+
+    def get_sum_q(self, obs, stack=True):
+        return self.sumQ(self.get_features(obs))
+    
+    def merge_q(self):
+        sumQW = self.sumQ.weight.data
+        sumQb = self.sumQ.bias.data
+        self.sumQ = clone_lin_model(self.output)
+        self.sumQ.weight.data[:, :sumQW.shape[1]] += sumQW
+        self.sumQ.bias.data += sumQb
+
+
 
 
 class CascadeQ(CascadeNN):

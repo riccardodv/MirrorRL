@@ -1,7 +1,7 @@
-import gym
+import gymnasium as gym
 import numpy as np
 import warnings
-from gym import spaces
+from gymnasium import spaces
 import itertools
 
 class HopperDiscrete:
@@ -46,4 +46,5 @@ class HopperDiscrete:
         return self.env.observation_space.shape[0]
 
     def seed(self, seed):
-        self.env.seed(seed)
+        # self.env.seed(seed)
+        self.env.reset(seed = seed)

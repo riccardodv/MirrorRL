@@ -1,8 +1,8 @@
 import numpy as np
 import warnings, pdb
 import torch
-import gym
-from gym.wrappers import FlattenObservation
+import gymnasium as gym
+from gymnasium.wrappers import FlattenObservation
 
 
 
@@ -64,7 +64,8 @@ class EnvWithTerminal:
         return self.env.observation_space.shape[0]
 
     def seed(self, seed):
-        self.env.seed(seed)
+        # self.env.seed(seed)
+        self.env.reset(seed = seed)
 
 
 class Sampler:
@@ -75,7 +76,7 @@ class Sampler:
 
     def _rollout(self, render=False, device='cpu'):
         # Generates SARSA type transitions until episode's end
-        obs = self.env.reset()
+        obs, _ = self.env.reset()
         obs_tensor = torch.FloatTensor(obs).to(device)
         act = self.policy(obs_tensor)
         done = False
