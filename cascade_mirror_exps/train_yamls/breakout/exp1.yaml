@@ -1,0 +1,11 @@
+exp_name: breakout_default
+env_id: MinAtar/Breakout-v0
+max_epoch: 150
+nb_samp_per_iter: 10000
+min_grad_steps_per_iter: 10000
+nb_add_neurone_per_iter: 10
+batch_size: 64
+lr_model: !!float 1e-3
+eta: 1
+gamma: 0.99
+seed: 0
