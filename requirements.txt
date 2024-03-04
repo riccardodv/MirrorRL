@@ -8,3 +8,4 @@ rlberry==0.6.0
 setuptools==68.0.0
 torch==2.0.1
 minatar
+tabulate

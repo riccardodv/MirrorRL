@@ -11,7 +11,7 @@ module load gcc/10.4.0_gcc-10.4.0
 module load cudnn/8.2.4.15-11.4_gcc-10.4.0
 
 
-cd $HOME/MirroRL/cascade_mirror_exps/
+cd $HOME/MirrorRL/cascade_mirror_exps
 
 python cascade_mirror_rl_fqi_bn.py $1
 
