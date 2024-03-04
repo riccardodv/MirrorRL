@@ -10,9 +10,15 @@ from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
 from cascade.discrete_envs import PendulumDiscrete, HopperDiscrete
-from ray import tune
+from ray import tune, air
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
+
+import sys
+
+
+
+import yaml
 
 # ENV_ID = "CartPole-v1"
 # ENV_ID = "Acrobot-v1"
@@ -21,7 +27,33 @@ from ray.tune.schedulers import ASHAScheduler
 ENV_ID = "MinAtar/Breakout-v0" #try with larger eta; eta = 0.1 -> reward = 6
 # ENV_ID = "MinAtar/Freeway-v0" #try with larger eta; eta = 0.1 -> reward = 6
 
+
+
 MAX_EPOCH = 150
+
+def make_tune_config(path):
+    with open(path, "rb") as f:
+        config = yaml.safe_load(f)
+    if "exp_name" in config.keys():
+        exp_name = config["exp_name"]
+        del config["exp_name"]
+    else:
+        exp_name = None
+    if "n_epoch" in config.keys():
+        n_epoch = config["n_epoch"]
+        # del config["exp_name"]
+    else:
+        n_epoch = MAX_EPOCH
+    tune_config = {}
+    for k in config.keys():
+        value = config[k]
+        if not isinstance(value, list):
+            value = [value]
+        tune_config[k] = tune.grid_search(value)
+    return tune_config, exp_name, n_epoch
+
+
+
 
 default_config = {
         "env_id": ENV_ID,
@@ -201,42 +233,52 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     print("Finished Training!")
 
 
-def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpus_per_trial=0.):
-    config = {
-        "nb_samp_per_iter": tune.grid_search([10000]),
-        "min_grad_steps_per_iter": tune.grid_search([10000]),
-        "nb_add_neurone_per_iter": tune.grid_search([10]),
-        "batch_size": tune.grid_search([64]),
-        "lr_model": tune.grid_search([1e-3]),
-        "max_replay_memory_size": tune.grid_search([10000]),
-        #"eta": tune.loguniform(0.1, 10),
-        "eta": tune.grid_search([0.1]), # the smaller the better, best around 0.1, 0.5
-        "gamma": tune.grid_search([0.99]),
-        "seed": tune.grid_search([1]),
-        "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
-        "env_id" : tune.grid_search([ENV_ID]), 
-        "max_epoch": tune.grid_search([MAX_EPOCH])
-    }
+# def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpus_per_trial=0.):
+def main(yaml_path, num_samples = 1, rf = 1.1, gpus_per_trial = 0):
+    config, exp_name, n_epoch = make_tune_config(yaml_path)
+    # config = {
+    #     "nb_samp_per_iter": tune.grid_search([10000]),
+    #     "min_grad_steps_per_iter": tune.grid_search([10000]),
+    #     "nb_add_neurone_per_iter": tune.grid_search([10]),
+    #     "batch_size": tune.grid_search([64]),
+    #     "lr_model": tune.grid_search([1e-3]),
+    #     "max_replay_memory_size": tune.grid_search([10000]),
+    #     #"eta": tune.loguniform(0.1, 10),
+    #     "eta": tune.grid_search([0.1]), # the smaller the better, best around 0.1, 0.5
+    #     "gamma": tune.grid_search([0.99]),
+    #     "seed": tune.grid_search([1]),
+    #     "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
+    #     "env_id" : tune.grid_search([ENV_ID]), 
+    #     "max_epoch": tune.grid_search([MAX_EPOCH])
+    # }
 
     scheduler = ASHAScheduler(
         metric="average_reward",
         mode="max",
-        max_t=max_num_epochs,
-        grace_period=min_epochs_per_trial,
+        max_t=n_epoch,
+        grace_period=n_epoch,
         reduction_factor= rf)
 
-    reporter = CLIReporter(
-        # parameter_columns=["l1", "l2", "lr", "batch_size"],
-        metric_columns=["average_reward", "q_error_train", "kl", "entropy"])
 
-    result = tune.run(
-        run,
-        resources_per_trial={"cpu": 1, "gpu": gpus_per_trial},
-        config=config,
-        num_samples=num_samples,
-        scheduler=scheduler,
-        progress_reporter=reporter,
-        verbose = 0)
+    tuner = tune.Tuner(
+        tune.with_resources(
+            tune.with_parameters(run),
+            resources={"cpu": 1, "gpu": gpus_per_trial}
+        ),
+        tune_config=tune.TuneConfig(
+            metric="average_reward",
+            mode="max",
+            scheduler=scheduler,
+            num_samples=num_samples,
+        ),
+        param_space=config,
+        run_config = air.RunConfig(local_dir="./paper_results", name=exp_name,
+                                   checkpoint_config=air.CheckpointConfig(
+                num_to_keep = 1
+            ),
+        )
+    )
+    result = tuner.fit()
 
     best_trial = result.get_best_trial("average_reward", "max", "last-10-avg")
     print("Best trial config: {}".format(best_trial.config))
@@ -254,6 +296,8 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
 
 
 if __name__ == '__main__':
+    path = sys.argv[1]
+    # main(path)
     # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
     #main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
     run(default_config, save_model_dir='models')
