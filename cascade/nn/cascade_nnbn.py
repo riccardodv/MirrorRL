@@ -31,7 +31,10 @@ class CascadeNNBN2(nn.Module):
         self.output.bias.data[:] = 0.
 
     def __call__(self, x):
-        return self.output(self.get_features(x)[..., -self.nb_hidden:])
+        if self.nb_hidden == 0:
+            return self.output(self.get_features(x)[..., :0])
+        else:
+            return self.output(self.get_features(x)[..., -self.nb_hidden:])
 
     def get_features(self, x):
         features = torch.zeros(x.shape[0], self.nb_hidden + x.shape[1])
@@ -54,7 +57,10 @@ class CascadeNNBN2(nn.Module):
         self.output.bias.data[:] = old_out.bias
 
     def forward_from_frozen_features(self, feat):
-        return self.output(torch.cat([feat, self.last_neurone()(feat)], dim=1)[..., -self.nb_hidden:])
+        if self.nb_hidden == 0:
+            return self.output(torch.cat([feat, self.last_neurone()(feat)], dim=1)[..., :0])
+        else:
+            return self.output(torch.cat([feat, self.last_neurone()(feat)], dim=1)[..., -self.nb_hidden:])
 
     def last_neurone(self):
         return self.cascade_neurone_list[-1]

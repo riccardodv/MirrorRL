@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from cascade.utils import EnvWithTerminal, Sampler, merge_data_, update_logging_stats, softmax_policy, get_targets_qvals, uniform_random_policy
-from cascade.nn import CascadeQ, CascadeQ2, CascadeQBN
+from cascade.nn import CascadeQ, CascadeQ2, CascadeQBN, CascadeQBN2
 from cascade.utils import clone_lin_model, stable_kl_div
 import os
 import pandas as pd
@@ -120,7 +120,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     neurone_non_linearity = torch.nn.ReLU()
     # neurone_non_linearity = torch.nn.SiLU()
 
-    cascade_qfunc = CascadeQBN(dim_s, nb_act)
+    cascade_qfunc = CascadeQBN2(dim_s, nb_act, init_nb_hidden = 0, non_linearity = neurone_non_linearity)
     cascade_qfunc.to(device)
 
     total_ts = 0
@@ -253,8 +253,6 @@ def main(yaml_path, num_samples = 1, rf = 1.1, gpus_per_trial = 0):
     # }
 
     scheduler = ASHAScheduler(
-        metric="average_reward",
-        mode="max",
         max_t=n_epoch,
         grace_period=n_epoch,
         reduction_factor= rf)
@@ -297,7 +295,7 @@ def main(yaml_path, num_samples = 1, rf = 1.1, gpus_per_trial = 0):
 
 if __name__ == '__main__':
     path = sys.argv[1]
-    # main(path)
+    main(path)
     # main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.5)
     #main(1, MAX_EPOCH, MAX_EPOCH, 1.1, 0.)
-    run(default_config, save_model_dir='models')
+    # run(default_config, save_model_dir='models')

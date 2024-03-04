@@ -13,3 +13,4 @@ build/
 *.is_checkpoint
 *checkpoint
 *.ipynb
+*paper_results/

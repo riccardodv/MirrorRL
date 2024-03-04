@@ -26,7 +26,10 @@ class CascadeQBN2(CascadeNNBN2):
         self.sumQ = clone_lin_model(self.output)
 
     def get_sum_q(self, obs, stack=True):
-        return self.sumQ(self.get_features(obs)[..., -self.nb_hidden:])
+        if self.nb_hidden == 0:
+            return self.sumQ(self.get_features(obs)[..., :0])
+        else:
+            return self.sumQ(self.get_features(obs)[..., -self.nb_hidden:])
     
     def merge_q(self):
         sumQW = self.sumQ.weight.data
