@@ -210,18 +210,6 @@ class CascadeNN2(nn.Module):
     def get_features(self, x, stack=True):
         if stack:
             return self.cascade(x)
-        # else:
-        #     features = torch.zeros(x.shape[0], self.nb_hidden)
-        #     st_in = 0
-        #     # features[:, :x.shape[1]] = x
-        #     for casc in self.cascade:
-        #         # nb_in = casc.f[0].in_features
-        #         nb_out = casc.f[0].out_features
-        #         output = casc(x, stack=False)
-        #         features[:, st_in:st_in+nb_out] = output
-        #         x = torch.cat([x, output], dim = -1)
-        #         st_in +=nb_out
-        #     return features
         else:
             features = torch.zeros(x.shape[0], self.nb_hidden + x.shape[1])
             features[:, :x.shape[1]] = x
