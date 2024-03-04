@@ -62,7 +62,7 @@ class MLP(torch.nn.Module):
 env_name = ['pendulum', 'acrobot'][0]
 if env_name == 'pendulum':
     load_path = os.path.dirname(__file__)
-    load_path = os.path.join(load_path, "models", "cascade_qfunc_DiscretePendulum_iter15.pt")
+    load_path = os.path.join(load_path, "models", "cascade_qfunc_DiscretePendulum_iter_15.pth")
     pol = torch.load(load_path)
     env = PendulumDiscrete(horizon=1200)
 elif env_name == 'acrobot':

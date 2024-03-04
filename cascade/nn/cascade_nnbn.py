@@ -17,8 +17,9 @@ class CascadeNeuroneBN(nn.Module):
         return self.bn(self.f(x))
 
 
-class CascadeNNBN:
+class CascadeNNBN(nn.Module):
     def __init__(self, dim_input, dim_output):
+        super().__init__()
         self.dim_input = dim_input
         self.dim_output = dim_output
         self.nb_hidden = 0

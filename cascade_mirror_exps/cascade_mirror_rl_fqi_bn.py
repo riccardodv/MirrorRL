@@ -28,18 +28,12 @@ default_config = {
         "max_epoch": MAX_EPOCH,
         "nb_samp_per_iter": 10000,
         "min_grad_steps_per_iter": 10000,
-        "nb_add_neurone_per_iter": 50,
+        "nb_add_neurone_per_iter": 10,
         "batch_size": 64,
         "lr_model": 1e-3,
-        "max_replay_memory_size": 10**4,
         "eta": 1,
         "gamma": 0.99,
         "seed": 0,
-        "nb_inputs": 50 # number of inputs to connect to without the input state dimension
-        # "env_id": ENV_ID,
-        # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
-        # "lr": tune.loguniform(1e-4, 1e-1),
-        # "batch_size": tune.choice([2, 4, 8, 16])
     }
  
 
@@ -55,7 +49,6 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
     nb_add_neurone_per_iter = config["nb_add_neurone_per_iter"]
     batch_size = config["batch_size"]
     lr_model = config["lr_model"]
-    max_replay_memory_size = config["max_replay_memory_size"]
     eta = config["eta"]
     gamma = config["gamma"]
     lam = 0.
@@ -106,7 +99,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
         cascade_qfunc.train(False)     
         roll = env_sampler.rollouts(lambda x: softmax_policy(
-                x, cascade_qfunc.sumQ, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
+                x, cascade_qfunc.get_sum_q, eta), min_trans=nb_samp_per_iter, max_trans=nb_samp_per_iter, device = device)
         curr_cum_rwd, returns_list, total_ts = update_logging_stats(
             roll['rwd'], roll['done'], curr_cum_rwd, returns_list, total_ts)
 
@@ -134,7 +127,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
             nobs_feat = cascade_qfunc.get_features(nobs)
             print("Device of nobs", nobs.device)
 
-        obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc.sumQ(obs))
+        obs_old_distrib = torch.distributions.Categorical(logits=eta * cascade_qfunc.get_sum_q(obs))
 
 
         cascade_qfunc.add_n_neurones(n_neurones=nb_add_neurone_per_iter, non_linearity=neurone_non_linearity)
@@ -185,7 +178,7 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
         with torch.no_grad():
             cascade_qfunc.train(False)
             new_distrib = torch.distributions.Categorical(
-                logits=eta * cascade_qfunc.sumQ(obs))
+                logits=eta * cascade_qfunc.get_sum_q(obs))
 
             kl = stable_kl_div(obs_old_distrib.probs,
                                new_distrib.probs).mean().item()
@@ -209,23 +202,6 @@ def run(config, checkpoint_dir=None, save_model_dir=None):
 
 
 def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpus_per_trial=0.):
-    # config for cartpole
-    # config = {
-    #     "nb_samp_per_iter": tune.grid_search([10000]),
-    #     "min_grad_steps_per_iter": tune.grid_search([10000]),
-    #     "nb_add_neurone_per_iter": tune.grid_search([10]),
-    #     "batch_size": tune.grid_search([64]),
-    #     "lr_model": tune.grid_search([1e-3]),
-    #     "max_replay_memory_size": tune.grid_search([10000]),
-    #     #"eta": tune.loguniform(0.1, 10),
-    #     "eta": tune.grid_search([0.1]),
-    #     "gamma": tune.grid_search([0.99]),
-    #     "seed": tune.grid_search([1, 11, 100, 1001, 2999])
-    #     # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
-    #     # "lr": tune.loguniform(1e-4, 1e-1),
-    #     # "batch_size": tune.choice([2, 4, 8, 16])
-    # }
-    # config for acrobot
     config = {
         "nb_samp_per_iter": tune.grid_search([10000]),
         "min_grad_steps_per_iter": tune.grid_search([10000]),
@@ -240,9 +216,6 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         "nb_inputs": tune.grid_search([-1]), #-1 if you want full cascade, otherwise specify nb_neurons to be connected to, including input
         "env_id" : tune.grid_search([ENV_ID]), 
         "max_epoch": tune.grid_search([MAX_EPOCH])
-        # "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
-        # "lr": tune.loguniform(1e-4, 1e-1),
-        # "batch_size": tune.choice([2, 4, 8, 16])
     }
 
     scheduler = ASHAScheduler(
@@ -278,22 +251,6 @@ def main(num_samples=10, max_num_epochs=10, min_epochs_per_trial=10, rf= 2., gpu
         best_trial.checkpoint.value
     ))
 
-
-    # best_trained_model = Net(best_trial.config["l1"], best_trial.config["l2"])
-    # device = "cpu"
-    # if torch.cuda.is_available():
-    #     device = "cuda:0"
-    #     if gpus_per_trial > 1:
-    #         best_trained_model = nn.DataParallel(best_trained_model)
-    # best_trained_model.to(device)
-
-    # best_checkpoint_dir = best_trial.checkpoint.value
-    # model_state, optimizer_state = torch.load(os.path.join(
-    #     best_checkpoint_dir, "checkpoint"))
-    # best_trained_model.load_state_dict(model_state)
-
-    # test_acc = test_accuracy(best_trained_model, device)
-    # print("Best trial test set accuracy: {}".format(test_acc))
 
 
 if __name__ == '__main__':
